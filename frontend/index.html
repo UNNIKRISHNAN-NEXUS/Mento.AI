@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mento.AI — AI-Powered Syllabus-Based Notes Extractor</title>
+    <meta name="description" content="Intelligent document parsing and semantic similarity indexing. Extract syllabus-mapped notes with zero data loss.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- CSS Stylesheet -->
+    <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body>
+    <div class="background-decor-1"></div>
+    <div class="background-decor-2"></div>
+
+    <main class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-container">
+                <span class="logo-icon">🧠</span>
+                <span class="logo-text">Mento<span>.AI</span></span>
+            </div>
+            <h1>Syllabus-Based Notes Extractor</h1>
+            <p class="tagline">Upload your study material and syllabus. Get structured, context-mapped notes with zero data loss.</p>
+        </header>
+
+        <!-- Main Card Interface -->
+        <section class="glass-card" id="main-interface">
+            <!-- Step 1: Upload Form -->
+            <div id="upload-stage" class="stage-section active">
+                <div class="inputs-grid">
+                    <!-- Study Material Upload -->
+                    <div class="upload-box" id="study-material-dropzone">
+                        <input type="file" id="study-material-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" multiple class="file-input">
+                        <div class="upload-content">
+                            <div class="icon-wrapper">
+                                <span class="upload-icon">📄</span>
+                            </div>
+                            <h3>Study Material</h3>
+                            <p class="upload-desc">Drag & drop or browse (One or multiple files)</p>
+                            <p class="file-info">PDF, DOCX, TXT, PNG, JPG, WEBP</p>
+                        </div>
+                        <div class="selected-file-badge" id="study-file-badge">
+                            <div class="badge-status-header">
+                                <span class="badge-icon">✓</span>
+                                <span class="badge-status-title" id="study-status-title">File Uploaded</span>
+                            </div>
+                            <div class="badge-names-list" id="study-file-names">filename.pdf</div>
+                            <button type="button" class="remove-file-btn" id="remove-study-btn" title="Remove file">
+                                <span>🗑</span> Remove All
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Syllabus Container (Tabs + File/Text Box) -->
+                    <div class="syllabus-box-wrapper">
+                        <div class="tab-switcher">
+                            <button type="button" class="tab-btn active" id="tab-syllabus-file">📁 Upload File</button>
+                            <button type="button" class="tab-btn" id="tab-syllabus-text">✍️ Type Syllabus</button>
+                        </div>
+
+                        <!-- Tab 1: File Dropzone -->
+                        <div class="upload-box" id="syllabus-dropzone">
+                            <input type="file" id="syllabus-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" class="file-input">
+                            <div class="upload-content">
+                                <div class="icon-wrapper">
+                                    <span class="upload-icon">📋</span>
+                                </div>
+                                <h3>Syllabus File</h3>
+                                <p class="upload-desc">Drag & drop or browse</p>
+                                <p class="file-info">PDF, DOCX, TXT, PNG, JPG, WEBP</p>
+                            </div>
+                            <div class="selected-file-badge" id="syllabus-file-badge">
+                                <div class="badge-status-header">
+                                    <span class="badge-icon">✓</span>
+                                    <span class="badge-status-title">File Uploaded</span>
+                                </div>
+                                <span class="badge-name" id="syllabus-file-name">syllabus.docx</span>
+                                <button type="button" class="remove-file-btn" id="remove-syllabus-btn" title="Remove file">
+                                    <span>🗑</span> Remove
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Tab 2: Textarea Container -->
+                        <div class="text-input-box" id="syllabus-text-box" style="display: none;">
+                            <textarea id="syllabus-text-input" placeholder="Type or paste your syllabus units and topics here...&#10;&#10;Example:&#10;UNIT I: MACHINE LEARNING&#10;- Introduction to Supervised and Unsupervised Learning&#10;- Evaluation metrics: Accuracy, Precision, Recall&#10;&#10;UNIT II: NEURAL NETWORKS&#10;- Artificial Neural Networks and Backpropagation" rows="7"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Parameters & Run -->
+                <div class="params-container">
+                    <!-- AI Extraction Skills -->
+                    <div class="skills-toggle-container">
+                        <span class="skills-label">AI Extraction Skills:</span>
+                        <div class="skills-pills">
+                            <label class="skill-pill" id="toggle-math-mode">
+                                <input type="checkbox" id="chk-math-mode">
+                                <span>📐 Math Symbol & Function Mode</span>
+                            </label>
+                            <label class="skill-pill" id="toggle-handwriting-mode">
+                                <input type="checkbox" id="chk-handwriting-mode">
+                                <span>✍️ English Handwriting OCR</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="slider-group">
+                        <label for="threshold-slider">
+                            <span>Semantic Similarity Threshold</span>
+                            <span class="tooltip" title="Lower threshold yields more matches (broader); Higher yields fewer, more exact matches.">ⓘ</span>
+                            <strong id="threshold-val">0.35</strong>
+                        </label>
+                        <input type="range" id="threshold-slider" min="0.20" max="0.60" step="0.05" value="0.35">
+                    </div>
+                    <button type="button" id="start-process-btn" class="btn primary-btn disabled" disabled>
+                        <span>Extract & Match Notes</span>
+                        <span class="btn-glow"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 2: Processing Progress -->
+            <div id="processing-stage" class="stage-section">
+                <div class="progress-container">
+                    <div class="progress-ring-wrapper">
+                        <!-- Custom animated micro-progress ring/bar -->
+                        <div class="bar-outer">
+                            <div class="bar-inner" id="progress-bar-fill"></div>
+                        </div>
+                        <div class="progress-percentage" id="progress-pct">0%</div>
+                    </div>
+                    <h3 id="progress-status-title">Uploading documents...</h3>
+                    <p id="progress-status-sub">Please do not close this window.</p>
+                </div>
+            </div>
+
+            <!-- Step 3: Preview and Refine -->
+            <div id="preview-stage" class="stage-section">
+                <div class="preview-header">
+                    <h2>Matched Syllabus Notes Preview</h2>
+                    <p>Review and exclude specific matched sections before downloading your compiled notes.</p>
+                </div>
+
+                <!-- Coverage Audit Card -->
+                <div class="audit-card" id="audit-summary-card">
+                    <div class="audit-card-header">
+                        <div class="audit-score-pill">
+                            <span class="audit-score-val" id="audit-score-val">0%</span>
+                            <span class="audit-score-label">Syllabus Coverage</span>
+                        </div>
+                        <div class="audit-stats-grid">
+                            <div class="stat-pill success">
+                                <span class="stat-num" id="stat-matched-count">0</span>
+                                <span class="stat-lbl">Covered Topics</span>
+                            </div>
+                            <div class="stat-pill danger">
+                                <span class="stat-num" id="stat-missing-count">0</span>
+                                <span class="stat-lbl">Missing Topics</span>
+                            </div>
+                            <div class="stat-pill info">
+                                <span class="stat-num" id="stat-snippets-count">0</span>
+                                <span class="stat-lbl">Excerpts Extracted</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Missing Topics Warning Alert -->
+                    <div class="missing-topics-container" id="missing-topics-box" style="display: none;">
+                        <div class="missing-topics-title">
+                            <span>⚠️ Options / Topics Not Found in Study Material:</span>
+                        </div>
+                        <ul class="missing-topics-list" id="missing-topics-list">
+                            <!-- Populated dynamically by app.js -->
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="preview-meta-bar">
+                    <div class="meta-item">
+                        <span class="meta-label">Material:</span>
+                        <span class="meta-value" id="preview-study-file">study.pdf</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Syllabus:</span>
+                        <span class="meta-value" id="preview-syllabus-file">syllabus.pdf</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Total Topics Match:</span>
+                        <span class="meta-value" id="preview-total-matches">0</span>
+                    </div>
+                </div>
+
+                <!-- Preview Area with Accordion structure -->
+                <div class="preview-accordion" id="results-accordion">
+                    <!-- Topics will be dynamically loaded here by app.js -->
+                </div>
+
+                <!-- Footer buttons & Export Format Selector -->
+                <div class="preview-actions">
+                    <button type="button" id="back-to-upload-btn" class="btn secondary-btn">
+                        <span>Upload New Files</span>
+                    </button>
+                    
+                    <div class="export-format-wrapper">
+                        <span class="export-label">Format:</span>
+                        <div class="format-options-toggle">
+                            <label class="format-choice active" id="choice-docx">
+                                <input type="radio" name="export_format" value="docx" checked>
+                                <span>📄 DOCX</span>
+                            </label>
+                            <label class="format-choice" id="choice-pdf">
+                                <input type="radio" name="export_format" value="pdf">
+                                <span>📕 PDF</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <button type="button" id="generate-docx-btn" class="btn success-btn">
+                        <span>Compile & Export Notes</span>
+                        <span class="btn-glow"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 4: Finished & Download -->
+            <div id="download-stage" class="stage-section">
+                <div class="download-container">
+                    <div class="success-seal">✓</div>
+                    <h2>Compilation Complete!</h2>
+                    <p>Your notes have been organized matching the syllabus layout with zero text data loss.</p>
+                    
+                    <div class="download-card">
+                        <div class="docx-icon">W</div>
+                        <div class="download-card-details">
+                            <h4 id="download-filename">extracted_notes.docx</h4>
+                            <p id="download-file-size">Ready for review</p>
+                        </div>
+                    </div>
+
+                    <div class="download-actions">
+                        <button type="button" id="restart-btn" class="btn secondary-btn">Restart Process</button>
+                        <a href="#" id="direct-download-link" class="btn success-btn">
+                            <span>Download DOCX</span>
+                            <span class="btn-glow"></span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <p>&copy; 2026 Mento.AI. Designed with Glassmorphism and powered by Sentence-Transformers (all-MiniLM-L6-v2) & FAISS.</p>
+    </footer>
+
+    <!-- App JavaScript -->
+    <script src="js/app.js?v=2"></script>
+</body>
+</html>

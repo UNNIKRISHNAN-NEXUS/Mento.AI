@@ -1,0 +1,35 @@
+# Python Virtual Environment
+backend/.venv/
+.venv/
+venv/
+ENV/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Temporary User Uploads & Generated Files
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/outputs/*
+!backend/outputs/.gitkeep
+backend/scratch/*
+uploads/*
+outputs/*
+*.docx
+*.pdf
+test_out.docx
+test_out.pdf
+test_study.txt
+test_syllabus.txt
+
+# IDE & OS Settings
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Vercel Build Output
+.vercel/

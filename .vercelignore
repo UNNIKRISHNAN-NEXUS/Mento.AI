@@ -1,0 +1,8 @@
+backend/.venv/
+backend/uploads/
+backend/outputs/
+backend/scratch/
+.git/
+__pycache__/
+*.pyc
+.env
