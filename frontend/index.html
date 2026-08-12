@@ -10,11 +10,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- CSS Stylesheet -->
-    <link rel="stylesheet" href="css/style.css?v=2">
+    <link rel="stylesheet" href="css/style.css?v=3">
 </head>
 <body>
     <div class="background-decor-1"></div>
     <div class="background-decor-2"></div>
+    <div class="background-decor-3"></div>
 
     <main class="app-container">
         <!-- Header -->
@@ -23,7 +24,8 @@
                 <span class="logo-icon">🧠</span>
                 <span class="logo-text">Mento<span>.AI</span></span>
             </div>
-            <h1>Syllabus-Based Notes Extractor</h1>
+            <div class="hero-badge">✨ AI-POWERED SYLLABUS MATCHING</div>
+            <h1 class="hero-title">Study Smarter. <span>Learn Everything.</span></h1>
             <p class="tagline">Upload your study material and syllabus. Get structured, context-mapped notes with zero data loss.</p>
         </header>
 
@@ -252,13 +254,49 @@
                 </div>
             </div>
         </section>
+
+        <!-- Bento Grid Features Showcase -->
+        <section class="bento-section">
+            <h2 class="bento-title">Engineered for Academic Excellence</h2>
+            <p class="bento-subtitle">Every feature designed to save hundreds of study hours with zero loss of content.</p>
+            
+            <div class="bento-grid">
+                <div class="bento-card bento-card-large">
+                    <div class="bento-icon">🧠</div>
+                    <h3>AI Semantic Similarity Indexing</h3>
+                    <p>Powered by <code>all-MiniLM-L6-v2</code> sentence embeddings and FAISS vector search. Matches syllabus topics based on conceptual meaning, not just keyphrase lookup.</p>
+                    <div class="bento-tag">SBERT + FAISS 384d</div>
+                </div>
+                
+                <div class="bento-card">
+                    <div class="bento-icon">🖼️</div>
+                    <h3>RapidOCR Engine</h3>
+                    <p>Scanned PDFs, photos of syllabi, and image notes are converted to searchable text automatically.</p>
+                    <div class="bento-tag">PNG, JPG, WEBP</div>
+                </div>
+
+                <div class="bento-card">
+                    <div class="bento-icon">⚡</div>
+                    <h3>Zero Data Loss</h3>
+                    <p>All matched content is fully preserved with page source citations and confidence scores.</p>
+                    <div class="bento-tag">100% Citation</div>
+                </div>
+
+                <div class="bento-card bento-card-wide">
+                    <div class="bento-icon">📑</div>
+                    <h3>Multi-Format Export</h3>
+                    <p>Export your syllabus-mapped notes directly as professionally formatted Microsoft Word (.docx) or PDF documents ready for printing and revision.</p>
+                    <div class="bento-tag">Word & PDF Ready</div>
+                </div>
+            </div>
+        </section>
     </main>
 
     <footer class="app-footer">
-        <p>&copy; 2026 Mento.AI. Designed with Glassmorphism and powered by Sentence-Transformers (all-MiniLM-L6-v2) & FAISS.</p>
+        <p>&copy; 2026 Mento.AI. Neural Indigo & Glassmorphism Design System. Powered by SBERT, FAISS & RapidOCR.</p>
     </footer>
 
     <!-- App JavaScript -->
-    <script src="js/app.js?v=2"></script>
+    <script src="js/app.js?v=3"></script>
 </body>
 </html>
