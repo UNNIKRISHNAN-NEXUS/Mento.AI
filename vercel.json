@@ -1,13 +1,10 @@
 {
   "version": 2,
+  "outputDirectory": "frontend",
   "builds": [
     {
       "src": "api/index.py",
       "use": "@vercel/python"
-    },
-    {
-      "src": "frontend/**",
-      "use": "@vercel/static"
     }
   ],
   "routes": [
@@ -17,19 +14,18 @@
     },
     {
       "src": "/css/(.*)",
-      "dest": "frontend/css/$1"
+      "dest": "/css/$1"
     },
     {
       "src": "/js/(.*)",
-      "dest": "frontend/js/$1"
+      "dest": "/js/$1"
     },
     {
-      "src": "/",
-      "dest": "frontend/index.html"
+      "handle": "filesystem"
     },
     {
       "src": "/(.*)",
-      "dest": "frontend/$1"
+      "dest": "/index.html"
     }
   ]
 }
