@@ -1,424 +1,966 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mento.AI — AI-Powered Syllabus Notes Extractor</title>
-    <meta name="description" content="Upload your study material and syllabus. Mento.AI uses AI to extract and compile perfectly matched notes with zero data loss.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=5">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mento.AI — AI-Powered Syllabus Notes Extractor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* ─── Keyframes ─── */
+@keyframes auroraFloat {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%     { transform: translate(50px,-40px) scale(1.06); }
+  66%     { transform: translate(-30px,50px) scale(0.96); }
+}
+@keyframes gradShift {
+  0%,100% { background-position: 0% 50%; }
+  50%     { background-position: 100% 50%; }
+}
+@keyframes slideUp {
+  from { opacity:0; transform:translateY(28px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+@keyframes float {
+  0%,100% { transform: translateY(0) rotate(-2deg); }
+  50%     { transform: translateY(-18px) rotate(-1deg); }
+}
+@keyframes spinRing {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes progressPulse {
+  0%,100% { box-shadow: 0 0 10px rgba(99,102,241,.5); }
+  50%     { box-shadow: 0 0 28px rgba(168,85,247,.8); }
+}
+@keyframes scaleIn {
+  from { transform: scale(.6); opacity:0; }
+  to   { transform: scale(1);  opacity:1; }
+}
+@keyframes barFill {
+  from { width: 0%; }
+  to   { width: var(--w, 80%); }
+}
+
+/* ─── Variables ─── */
+:root {
+  --bg:      #070814;
+  --sur:     rgba(13,16,40,.65);
+  --surh:    rgba(20,25,60,.85);
+  --bdr:     rgba(99,102,241,.2);
+  --bdra:    rgba(99,102,241,.55);
+  --ind:     #6366f1;
+  --vio:     #a855f7;
+  --cyn:     #06b6d4;
+  --grn:     #10b981;
+  --txt:     #f0f0ff;
+  --mut:     #94a3b8;
+  --fh:      'Outfit',sans-serif;
+  --fb:      'Inter',sans-serif;
+  --blur:    blur(24px);
+  --rad:     20px;
+}
+
+/* ─── Reset ─── */
+*,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  background:var(--bg); color:var(--txt);
+  font-family:var(--fb); min-height:100vh;
+  overflow-x:hidden; line-height:1.65;
+}
+
+/* ─── Aurora ─── */
+.aurora-wrap { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+.aurora-blob { position:absolute; border-radius:50%; filter:blur(80px); }
+.a1 { width:70vw;height:70vw;top:-20%;left:-20%;
+      background:radial-gradient(circle,rgba(99,102,241,.26) 0%,rgba(139,92,246,.1) 50%,transparent 70%);
+      animation:auroraFloat 22s ease-in-out infinite; }
+.a2 { width:65vw;height:65vw;bottom:-20%;right:-15%;
+      background:radial-gradient(circle,rgba(168,85,247,.22) 0%,rgba(6,182,212,.12) 50%,transparent 70%);
+      animation:auroraFloat 28s ease-in-out infinite reverse; }
+.a3 { width:40vw;height:40vw;top:35%;right:25%;
+      background:radial-gradient(circle,rgba(6,182,212,.18) 0%,transparent 70%);
+      animation:auroraFloat 18s ease-in-out infinite 5s; }
+.a4 { width:28vw;height:28vw;bottom:20%;left:30%;
+      background:radial-gradient(circle,rgba(99,102,241,.12) 0%,transparent 70%);
+      animation:auroraFloat 15s ease-in-out infinite 8s; }
+#pc { position:absolute;inset:0;width:100%;height:100%;opacity:.55; }
+
+/* ─── Navbar ─── */
+nav {
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  background:rgba(7,8,20,.82);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--bdr);
+}
+.ni {
+  max-width:1100px;margin:0 auto;padding:0 24px;height:64px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.nlogo { display:flex;align-items:center;gap:10px; }
+.nlogo-icon { font-size:24px; }
+.nlogo-text { font-family:var(--fh);font-size:22px;font-weight:800; }
+.nlogo-text span { color:var(--ind); }
+.nlinks { display:flex;align-items:center;gap:28px; }
+.nlinks a { color:var(--mut);text-decoration:none;font-size:14px;font-weight:500;transition:color .2s; }
+.nlinks a:hover { color:var(--txt); }
+.ncta {
+  background:var(--ind)!important;color:#fff!important;
+  padding:8px 20px;border-radius:30px;font-weight:700!important;
+  transition:all .25s!important;box-shadow:0 0 0 rgba(99,102,241,0);
+}
+.ncta:hover { background:#7c3aed!important;box-shadow:0 0 24px rgba(99,102,241,.5)!important; }
+
+/* ─── HERO ─── */
+.hero {
+  position:relative;z-index:1;
+  min-height:100vh;display:flex;align-items:center;
+  padding:100px 24px 60px;max-width:1100px;margin:0 auto;gap:48px;
+}
+.hc { flex:1; }
+.hpill {
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 18px;border-radius:50px;margin-bottom:24px;
+  background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);
+  color:#a5b4fc;font-size:11px;font-weight:700;letter-spacing:1.5px;
+  box-shadow:0 0 30px rgba(99,102,241,.2);
+  animation:slideUp .6s ease both;
+}
+h1.hh {
+  font-family:var(--fh);font-size:62px;font-weight:900;
+  line-height:1.08;letter-spacing:-2px;margin-bottom:20px;color:#fff;
+  animation:slideUp .7s ease .1s both;
+}
+.hgrad {
+  background:linear-gradient(135deg,#a5b4fc 0%,#38bdf8 40%,#c084fc 100%);
+  background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  animation:gradShift 5s ease infinite;
+}
+.hsub {
+  font-size:17px;color:var(--mut);max-width:500px;line-height:1.75;
+  margin-bottom:36px;animation:slideUp .8s ease .2s both;
+}
+.hbtns { display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:48px;animation:slideUp .9s ease .3s both; }
+.btn-main {
+  display:inline-flex;align-items:center;gap:10px;padding:14px 28px;
+  background:linear-gradient(135deg,var(--ind),var(--vio));
+  color:#fff;border-radius:50px;font-weight:700;font-size:15px;
+  text-decoration:none;border:none;cursor:pointer;transition:all .25s;
+  box-shadow:0 8px 30px rgba(99,102,241,.4);
+}
+.btn-main:hover { transform:translateY(-2px);box-shadow:0 14px 40px rgba(99,102,241,.6); }
+.btn-ghost {
+  display:inline-flex;align-items:center;padding:14px 24px;
+  border:1px solid var(--bdra);color:var(--txt);text-decoration:none;
+  border-radius:50px;font-weight:600;font-size:15px;background:rgba(99,102,241,.05);
+  cursor:pointer;transition:all .25s;
+}
+.btn-ghost:hover { background:rgba(99,102,241,.15); }
+.hstats { display:flex;align-items:center;gap:24px;animation:slideUp 1s ease .4s both; }
+.hstat { display:flex;flex-direction:column; }
+.snum { font-family:var(--fh);font-size:28px;font-weight:800;color:#fff; }
+.slbl { font-size:12px;color:var(--mut); }
+.sdiv { width:1px;height:40px;background:var(--bdr); }
+
+/* Hero Card */
+.hvisual { flex:0 0 370px;display:flex;align-items:center;justify-content:center; }
+.hcard {
+  width:355px;background:rgba(13,16,40,.72);
+  backdrop-filter:var(--blur);border:1px solid var(--bdr);
+  border-radius:var(--rad);overflow:hidden;
+  box-shadow:0 24px 60px rgba(0,0,0,.6),0 0 80px rgba(99,102,241,.12);
+  animation:float 6s ease-in-out infinite;
+}
+.hchead {
+  display:flex;align-items:center;gap:8px;padding:14px 16px;
+  border-bottom:1px solid var(--bdr);background:rgba(99,102,241,.06);
+}
+.dot { width:10px;height:10px;border-radius:50%; }
+.dg{background:#34d399;}.dy{background:#fbbf24;}.dr{background:#f87171;}
+.hctitle { font-size:12px;font-weight:600;color:var(--mut);margin-left:4px; }
+.hcbody { padding:16px;display:flex;flex-direction:column;gap:14px; }
+.hctopic {}
+.hctlbl { font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:6px; }
+.hcmatch { display:flex;align-items:center;gap:8px;margin-bottom:6px; }
+.hcbar { flex:1;height:4px;background:linear-gradient(90deg,var(--ind),var(--cyn));border-radius:4px; }
+.hcmatch span { font-size:11px;color:var(--mut);font-weight:600; }
+.hcex { font-size:11.5px;color:var(--mut);line-height:1.5; }
+.hcfoot { padding:12px 16px;border-top:1px solid var(--bdr);background:rgba(16,185,129,.05); }
+.hcbadge { font-size:12px;font-weight:700;color:var(--grn); }
+
+/* ─── Sections ─── */
+section { position:relative;z-index:1;padding:80px 24px;max-width:1100px;margin:0 auto; }
+.slbl { font-size:11px;font-weight:700;letter-spacing:2.5px;color:var(--ind);text-transform:uppercase;margin-bottom:12px; }
+h2.sh {
+  font-family:var(--fh);font-size:36px;font-weight:800;margin-bottom:48px;
+  background:linear-gradient(135deg,#fff 0%,#cbd5e1 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+
+/* ─── Steps ─── */
+.steps { display:flex;align-items:center;gap:20px;flex-wrap:wrap; }
+.scard {
+  flex:1;min-width:220px;background:var(--sur);backdrop-filter:var(--blur);
+  border:1px solid var(--bdr);border-radius:var(--rad);padding:32px;
+  transition:all .35s;position:relative;overflow:hidden;
+}
+.scard::before {
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--ind),var(--vio),var(--cyn));
+  opacity:0;transition:opacity .35s;
+}
+.scard:hover { border-color:var(--bdra);transform:translateY(-6px);box-shadow:0 20px 50px rgba(99,102,241,.15); }
+.scard:hover::before { opacity:1; }
+.snum { font-family:var(--fh);font-size:42px;font-weight:900;color:rgba(99,102,241,.15);line-height:1;margin-bottom:12px; }
+.sicon { font-size:30px;margin-bottom:16px; }
+.scard h3 { font-family:var(--fh);font-size:19px;font-weight:700;margin-bottom:10px;color:#fff; }
+.scard p  { font-size:14px;color:var(--mut);line-height:1.6;margin-bottom:16px; }
+.stag {
+  display:inline-block;padding:4px 12px;border-radius:20px;
+  background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);
+  color:#a5b4fc;font-size:11px;font-weight:600;
+}
+.sarrow { font-size:28px;color:var(--ind);opacity:.5; }
+
+/* ─── Bento ─── */
+.bgrid { display:grid;grid-template-columns:repeat(3,1fr);gap:20px; }
+.bc {
+  background:var(--sur);backdrop-filter:var(--blur);
+  border:1px solid var(--bdr);border-radius:var(--rad);padding:30px;
+  display:flex;flex-direction:column;gap:12px;transition:all .35s;
+}
+.bc:hover { border-color:var(--bdra);transform:translateY(-4px);box-shadow:0 16px 40px rgba(99,102,241,.15);background:var(--surh); }
+.blg { grid-column:span 2; }
+.bwd { grid-column:span 3; }
+.biwrap {
+  width:48px;height:48px;border-radius:14px;
+  display:flex;align-items:center;justify-content:center;font-size:22px;
+}
+.bi  { background:rgba(99,102,241,.15); }
+.bv  { background:rgba(168,85,247,.15); }
+.bcy { background:rgba(6,182,212,.15); }
+.bg  { background:rgba(16,185,129,.15); }
+.bo  { background:rgba(251,146,60,.15); }
+.bc h3 { font-family:var(--fh);font-size:18px;font-weight:700;color:#fff; }
+.bc p  { font-size:13.5px;color:var(--mut);line-height:1.65; }
+.bc code { background:rgba(99,102,241,.15);padding:2px 7px;border-radius:5px;color:#a5b4fc;font-size:12px; }
+.bchips { display:flex;gap:8px;flex-wrap:wrap; }
+.bchip {
+  padding:4px 11px;background:rgba(99,102,241,.1);
+  border:1px solid rgba(99,102,241,.2);border-radius:20px;
+  color:#a5b4fc;font-size:11px;font-weight:600;
+}
+
+/* ─── APP ─── */
+#app { padding-bottom:100px; }
+.acard {
+  background:var(--sur);backdrop-filter:var(--blur);
+  border:1px solid var(--bdr);border-radius:28px;
+  padding:40px;box-shadow:0 24px 60px rgba(0,0,0,.6),0 0 80px rgba(99,102,241,.1);
+}
+.stage { display:none;animation:slideUp .4s ease; }
+.stage.on { display:block; }
+
+/* Upload */
+.ugrid { display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px; }
+.uz {
+  position:relative;background:rgba(13,16,40,.5);
+  border:2px dashed rgba(99,102,241,.3);border-radius:var(--rad);
+  min-height:220px;overflow:hidden;transition:all .25s;cursor:pointer;
+}
+.uz:hover { border-color:var(--ind);background:rgba(99,102,241,.06); }
+.uz.over { border-color:var(--vio);background:rgba(168,85,247,.08); }
+.fip {
+  position:absolute;inset:0;opacity:0;cursor:pointer;
+  width:100%;height:100%;
+}
+.uzi {
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:36px 24px;text-align:center;min-height:220px;
+}
+.uzicon { font-size:36px;margin-bottom:12px; }
+.uzi h3 { font-family:var(--fh);font-size:18px;font-weight:700;margin-bottom:6px; }
+.uzi .usub { font-size:13px;color:var(--mut);margin-bottom:8px; }
+.uzi .utyp { font-size:12px;color:rgba(99,102,241,.7);font-weight:600; }
+
+/* File Badge */
+.fbadge {
+  display:none;position:absolute;inset:0;
+  background:rgba(16,185,129,.08);border:2px solid rgba(16,185,129,.35);
+  border-radius:var(--rad);padding:20px;
+  flex-direction:column;gap:10px;align-items:flex-start;justify-content:center;
+}
+.fbadge.show { display:flex; }
+.fbhdr { display:flex;align-items:center;gap:10px; }
+.fbchk {
+  width:28px;height:28px;border-radius:50%;background:var(--grn);
+  color:#fff;display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:800;
+}
+.fbhdr span { font-weight:700;color:var(--grn);font-size:15px; }
+.fbnames { font-size:12px;color:var(--mut);word-break:break-all; }
+.rmv {
+  background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.25);
+  color:#f87171;border-radius:8px;padding:6px 14px;
+  font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;
+}
+.rmv:hover { background:rgba(248,113,113,.2); }
+
+/* Syllabus block */
+.sylwrap { display:flex;flex-direction:column;gap:0; }
+.sytabs { display:flex;margin-bottom:12px; }
+.sytab {
+  flex:1;padding:10px;background:rgba(13,16,40,.5);border:1px solid var(--bdr);
+  color:var(--mut);font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;
+}
+.sytab:first-child { border-radius:12px 0 0 12px; }
+.sytab:last-child  { border-radius:0 12px 12px 0;border-left:none; }
+.sytab.on { background:rgba(99,102,241,.15);border-color:var(--ind);color:#a5b4fc; }
+.sylta { display:flex;flex:1; }
+.sylta.hidden { display:none; }
+.sylta textarea {
+  flex:1;min-height:200px;background:rgba(13,16,40,.5);
+  border:2px dashed rgba(99,102,241,.3);border-radius:var(--rad);
+  color:var(--txt);padding:16px;font-family:var(--fb);font-size:13px;
+  line-height:1.7;resize:vertical;transition:border-color .2s;
+}
+.sylta textarea:focus { outline:none;border-color:var(--ind); }
+
+/* Options */
+.optrow { display:flex;align-items:flex-start;gap:32px;margin-bottom:28px;flex-wrap:wrap; }
+.thrgrp { flex:1;min-width:200px; }
+.thrgrp label { font-size:13px;font-weight:600;color:var(--mut);display:flex;align-items:center;gap:6px;margin-bottom:10px; }
+.srow { display:flex;align-items:center;gap:12px; }
+.srow input[type=range] { flex:1;-webkit-appearance:none;height:4px;background:linear-gradient(90deg,var(--ind),var(--vio));border-radius:4px;outline:none; }
+.srow input[type=range]::-webkit-slider-thumb { -webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 0 8px rgba(99,102,241,.6);cursor:pointer; }
+.sval { font-weight:700;color:var(--ind);font-size:14px;min-width:36px; }
+.toggrp { display:flex;flex-direction:column;gap:12px; }
+.toglbl { display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:500;color:var(--mut);user-select:none; }
+.toglbl input { display:none; }
+.togswitch { width:40px;height:22px;border-radius:11px;background:rgba(99,102,241,.2);border:1px solid var(--bdr);position:relative;transition:all .25s; }
+.togswitch::after { content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--mut);transition:all .25s; }
+.toglbl input:checked + .togswitch { background:rgba(99,102,241,.4);border-color:var(--ind); }
+.toglbl input:checked + .togswitch::after { transform:translateX(18px);background:var(--ind); }
+
+.btn-ext {
+  width:100%;padding:16px;
+  background:linear-gradient(135deg,var(--ind),var(--vio));
+  background-size:200% 200%;color:#fff;border:none;border-radius:14px;
+  font-family:var(--fh);font-size:16px;font-weight:700;cursor:pointer;
+  transition:all .3s;box-shadow:0 8px 30px rgba(99,102,241,.4);
+  animation:gradShift 4s ease infinite;display:flex;align-items:center;justify-content:center;gap:10px;
+}
+.btn-ext:hover:not(.dis) { transform:translateY(-2px);box-shadow:0 14px 40px rgba(99,102,241,.6); }
+.btn-ext.dis { opacity:.4;cursor:not-allowed;animation:none;background:rgba(99,102,241,.3);box-shadow:none; }
+
+/* Processing */
+.procwrap { display:flex;flex-direction:column;align-items:center;padding:60px 24px;text-align:center;gap:20px; }
+.orb { width:100px;height:100px;position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:16px; }
+.ring { position:absolute;inset:0;border-radius:50%;border:2px solid transparent;border-top-color:var(--ind);border-right-color:var(--vio);animation:spinRing 2s linear infinite; }
+.ring2 { inset:12px;border-top-color:var(--cyn);border-right-color:var(--ind);animation-duration:1.4s;animation-direction:reverse; }
+.orbcore { font-size:32px;z-index:1; }
+.procwrap h2 { font-family:var(--fh);font-size:22px;font-weight:700;color:#fff; }
+.procwrap p  { font-size:14px;color:var(--mut); }
+.ptrack { width:100%;max-width:500px;height:6px;background:rgba(99,102,241,.15);border-radius:6px;overflow:hidden; }
+.pfill { height:100%;width:0%;background:linear-gradient(90deg,var(--ind),var(--vio),var(--cyn));border-radius:6px;transition:width .4s ease;animation:progressPulse 2s ease-in-out infinite; }
+.ppct { font-family:var(--fh);font-size:28px;font-weight:800;color:var(--ind); }
+
+/* Preview */
+.pvhdr { margin-bottom:20px; }
+.pvhdr h2 { font-family:var(--fh);font-size:22px;font-weight:700;margin-bottom:6px; }
+.pvhdr p  { font-size:13px;color:var(--mut); }
+.pvmeta { display:flex;gap:24px;margin-bottom:20px;flex-wrap:wrap; }
+.pmi { display:flex;align-items:center;gap:6px; }
+.pmilbl { font-size:12px;color:var(--mut);font-weight:600; }
+.pmi span:last-child { font-size:12px;font-weight:700;color:#a5b4fc; }
+.racc { display:flex;flex-direction:column;gap:10px;max-height:480px;overflow-y:auto;margin-bottom:20px; }
+.racc::-webkit-scrollbar { width:5px; }
+.racc::-webkit-scrollbar-thumb { background:var(--ind);border-radius:5px; }
+.ai { background:rgba(13,16,40,.5);border:1px solid var(--bdr);border-radius:14px;overflow:hidden; }
+.aihdr { display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;transition:background .2s; }
+.aihdr:hover { background:rgba(99,102,241,.06); }
+.aihdr input[type=checkbox] { accent-color:var(--ind);width:16px;height:16px; }
+.aititle { flex:1;font-family:var(--fh);font-size:15px;font-weight:700; }
+.aiscore { font-size:11px;font-weight:700;color:var(--cyn);background:rgba(6,182,212,.1);padding:2px 8px;border-radius:20px; }
+.aitog { color:var(--mut);font-size:18px;transition:transform .25s; }
+.aitog.open { transform:rotate(180deg); }
+.aibody { padding:0 18px;max-height:0;overflow:hidden;transition:all .3s ease; }
+.aibody.open { padding:14px 18px;max-height:600px; }
+.exblk { margin-bottom:10px; }
+.exblk label { display:flex;align-items:flex-start;gap:10px;cursor:pointer; }
+.exblk input { margin-top:3px;accent-color:var(--ind); }
+.extxt { font-size:13px;color:var(--mut);line-height:1.65; }
+
+/* Preview footer */
+.pvfoot { display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-top:20px;border-top:1px solid var(--bdr); }
+.btn-sm {
+  padding:11px 22px;background:transparent;border:1px solid var(--bdr);
+  color:var(--mut);border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;
+}
+.btn-sm:hover { border-color:var(--bdra);color:var(--txt); }
+.fmtpick { display:flex;align-items:center;gap:10px;margin-left:auto; }
+.fmtpick span { font-size:13px;color:var(--mut);font-weight:600; }
+.fmtc { display:flex;align-items:center;gap:6px;padding:8px 16px;background:rgba(13,16,40,.5);border:1px solid var(--bdr);border-radius:10px;cursor:pointer;transition:all .2s;font-size:13px;font-weight:600;color:var(--mut); }
+.fmtc input { display:none; }
+.fmtc.on { background:rgba(99,102,241,.15);border-color:var(--ind);color:#a5b4fc; }
+.btn-gen {
+  padding:12px 26px;background:linear-gradient(135deg,var(--ind),var(--vio));
+  color:#fff;border:none;border-radius:12px;font-family:var(--fh);font-size:15px;
+  font-weight:700;cursor:pointer;transition:all .25s;box-shadow:0 6px 24px rgba(99,102,241,.4);
+}
+.btn-gen:hover { transform:translateY(-2px);box-shadow:0 12px 32px rgba(99,102,241,.6); }
+
+/* Download */
+.dlwrap { display:flex;flex-direction:column;align-items:center;padding:60px 24px;text-align:center;gap:16px; }
+.dlseal { width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,var(--grn),#34d399);color:#fff;font-size:32px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 0 40px rgba(16,185,129,.5);animation:scaleIn .5s ease; }
+.dlwrap h2 { font-family:var(--fh);font-size:26px;font-weight:800; }
+.dlwrap p  { color:var(--mut);font-size:14px; }
+.dlcard { display:flex;align-items:center;gap:16px;background:rgba(13,16,40,.6);border:1px solid var(--bdr);border-radius:var(--rad);padding:20px 28px;margin:8px 0; }
+.dlw { width:48px;height:48px;border-radius:10px;background:#2b5ce6;color:#fff;font-size:22px;font-weight:900;display:flex;align-items:center;justify-content:center; }
+.dlinfo { display:flex;flex-direction:column;gap:4px;text-align:left; }
+.dlinfo strong { font-size:15px;font-weight:700; }
+.dlinfo span   { font-size:12px;color:var(--mut); }
+.dlacts { display:flex;align-items:center;gap:14px; }
+
+/* Footer */
+footer { position:relative;z-index:1;border-top:1px solid var(--bdr);padding:40px 24px;text-align:center;margin-top:20px; }
+.fi { max-width:800px;margin:0 auto;display:flex;flex-direction:column;align-items:center;gap:12px; }
+.flogo { display:flex;align-items:center;gap:8px;font-size:20px; }
+.fcp { font-size:12px;color:var(--mut); }
+.ftech { display:flex;gap:12px;flex-wrap:wrap;justify-content:center; }
+.ftech span { font-size:10px;font-weight:700;letter-spacing:1px;padding:3px 10px;border-radius:20px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.15);color:rgba(165,180,252,.7); }
+
+/* Scroll animation */
+.fiu { opacity:0;transform:translateY(24px);transition:all .6s ease; }
+.fiu.vis { opacity:1;transform:translateY(0); }
+
+/* Responsive */
+@media(max-width:900px) {
+  .hero { flex-direction:column;padding-top:90px; }
+  .hvisual { display:none; }
+  h1.hh { font-size:44px; }
+  .ugrid { grid-template-columns:1fr; }
+  .bgrid { grid-template-columns:1fr; }
+  .blg,.bwd { grid-column:span 1; }
+  .steps { flex-direction:column; }
+  .sarrow { transform:rotate(90deg); }
+  h2.sh { font-size:28px; }
+  .acard { padding:24px 16px; }
+}
+@media(max-width:600px) {
+  h1.hh { font-size:34px; }
+  .hbtns { flex-direction:column;align-items:flex-start; }
+  .pvfoot { flex-direction:column;align-items:stretch; }
+  .fmtpick { margin-left:0; }
+  .nlinks a:not(.ncta) { display:none; }
+}
+</style>
 </head>
 <body>
 
-    <!-- Aurora Background -->
-    <div class="aurora-wrap">
-        <div class="aurora-blob aurora-1"></div>
-        <div class="aurora-blob aurora-2"></div>
-        <div class="aurora-blob aurora-3"></div>
-        <div class="aurora-blob aurora-4"></div>
-        <canvas id="particle-canvas"></canvas>
+<div class="aurora-wrap">
+  <div class="aurora-blob a1"></div>
+  <div class="aurora-blob a2"></div>
+  <div class="aurora-blob a3"></div>
+  <div class="aurora-blob a4"></div>
+  <canvas id="pc"></canvas>
+</div>
+
+<!-- Navbar -->
+<nav>
+  <div class="ni">
+    <div class="nlogo">
+      <span class="nlogo-icon">🧠</span>
+      <span class="nlogo-text">Mento<span>.AI</span></span>
+    </div>
+    <div class="nlinks">
+      <a href="#features">Features</a>
+      <a href="#howitworks">How It Works</a>
+      <a href="#app" class="ncta">Launch App</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="hc">
+    <div class="hpill">✨ AI-POWERED · ZERO DATA LOSS · SEMANTIC MATCHING</div>
+    <h1 class="hh">Study Smarter.<br><span class="hgrad">Learn Everything.</span></h1>
+    <p class="hsub">Upload your study material and syllabus. Mento.AI's semantic AI engine extracts, maps, and compiles perfectly organized notes for every topic — with zero data loss.</p>
+    <div class="hbtns">
+      <a href="#app" class="btn-main">
+        <span>Start Extracting Free</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </a>
+      <a href="#howitworks" class="btn-ghost">See How It Works</a>
+    </div>
+    <div class="hstats">
+      <div class="hstat"><span class="snum">500+</span><span class="slbl">Students Helped</span></div>
+      <div class="sdiv"></div>
+      <div class="hstat"><span class="snum">99.9%</span><span class="slbl">Data Accuracy</span></div>
+      <div class="sdiv"></div>
+      <div class="hstat"><span class="snum">10+</span><span class="slbl">Formats Supported</span></div>
+    </div>
+  </div>
+  <div class="hvisual">
+    <div class="hcard">
+      <div class="hchead">
+        <div class="dot dg"></div><div class="dot dy"></div><div class="dot dr"></div>
+        <span class="hctitle">mento_ai_notes.docx</span>
+      </div>
+      <div class="hcbody">
+        <div class="hctopic">
+          <div class="hctlbl">Unit 1: Neural Networks</div>
+          <div class="hcmatch"><div class="hcbar" style="width:92%"></div><span>92%</span></div>
+          <div class="hcex">A neural network is a series of algorithms that endeavors to recognize underlying relationships in a set of data through a process that mimics...</div>
+        </div>
+        <div class="hctopic">
+          <div class="hctlbl">Unit 2: Backpropagation</div>
+          <div class="hcmatch"><div class="hcbar" style="width:87%"></div><span>87%</span></div>
+          <div class="hcex">Backpropagation is the algorithm used to calculate gradients of the loss function with respect to each weight by the chain rule...</div>
+        </div>
+        <div class="hctopic">
+          <div class="hctlbl">Unit 3: Gradient Descent</div>
+          <div class="hcmatch"><div class="hcbar" style="width:79%"></div><span>79%</span></div>
+          <div class="hcex">Gradient descent is an optimization algorithm used to minimize the cost function by iteratively moving in the direction...</div>
+        </div>
+      </div>
+      <div class="hcfoot"><div class="hcbadge">✓ Ready to Download</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- How It Works -->
+<section id="howitworks">
+  <div class="slbl">HOW IT WORKS</div>
+  <h2 class="sh">Three Steps to Perfect Notes</h2>
+  <div class="steps">
+    <div class="scard fiu">
+      <div class="snum">01</div>
+      <div class="sicon">📄</div>
+      <h3>Upload Study Material</h3>
+      <p>Drop in your textbook, lecture notes, or scanned pages. PDF, DOCX, TXT, and images all work.</p>
+      <div class="stag">PDF · DOCX · TXT · Images</div>
+    </div>
+    <div class="sarrow">→</div>
+    <div class="scard fiu">
+      <div class="snum">02</div>
+      <div class="sicon">📋</div>
+      <h3>Add Your Syllabus</h3>
+      <p>Upload your syllabus file or paste it as text. Mento.AI parses every unit and topic automatically.</p>
+      <div class="stag">File or Text Input</div>
+    </div>
+    <div class="sarrow">→</div>
+    <div class="scard fiu">
+      <div class="snum">03</div>
+      <div class="sicon">✨</div>
+      <h3>Download Your Notes</h3>
+      <p>Get a beautifully formatted Word document or PDF with every topic mapped to its relevant content.</p>
+      <div class="stag">DOCX · PDF Export</div>
+    </div>
+  </div>
+</section>
+
+<!-- Features Bento -->
+<section id="features">
+  <div class="slbl">FEATURES</div>
+  <h2 class="sh">Engineered for Academic Excellence</h2>
+  <div class="bgrid">
+    <div class="bc blg fiu">
+      <div class="biwrap bi">🧠</div>
+      <h3>AI Semantic Matching</h3>
+      <p>Powered by <code>all-MiniLM-L6-v2</code> sentence embeddings and FAISS vector search. Matches syllabus topics based on deep conceptual meaning — not just keywords.</p>
+      <div class="bchips"><span class="bchip">SBERT</span><span class="bchip">FAISS 384d</span><span class="bchip">Cosine Similarity</span></div>
+    </div>
+    <div class="bc fiu">
+      <div class="biwrap bv">🖼️</div>
+      <h3>RapidOCR Engine</h3>
+      <p>Scanned PDFs, handwritten notes, and image syllabi converted to text automatically.</p>
+      <div class="bchips"><span class="bchip">PNG · JPG · WEBP</span></div>
+    </div>
+    <div class="bc fiu">
+      <div class="biwrap bcy">⚡</div>
+      <h3>Zero Data Loss</h3>
+      <p>Every matched paragraph is fully preserved with page source, confidence score, and topic citation.</p>
+      <div class="bchips"><span class="bchip">100% Preserved</span></div>
+    </div>
+    <div class="bc fiu">
+      <div class="biwrap bg">📑</div>
+      <h3>Multi-Format Export</h3>
+      <p>Export organized notes as Microsoft Word (.docx) or PDF — printer-ready and revision-ready.</p>
+      <div class="bchips"><span class="bchip">Word</span><span class="bchip">PDF</span></div>
+    </div>
+    <div class="bc bwd fiu">
+      <div class="biwrap bo">📊</div>
+      <h3>Real-Time Progress Streaming</h3>
+      <p>Watch your notes being built live with a real-time progress feed powered by Server-Sent Events (SSE). See every parsing and matching step happen as it runs — no page reload needed.</p>
+      <div class="bchips"><span class="bchip">SSE Streaming</span><span class="bchip">Live Progress</span><span class="bchip">Background Processing</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- App Interface -->
+<section id="app">
+  <div class="slbl">LAUNCH APP</div>
+  <h2 class="sh">Extract Your Notes Now</h2>
+  <div class="acard">
+
+    <!-- Stage 1: Upload -->
+    <div id="upload-stage" class="stage on">
+      <div class="ugrid">
+        <!-- Study Material -->
+        <div class="uz" id="study-material-dropzone">
+          <input type="file" id="study-material-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" multiple class="fip">
+          <div class="uzi">
+            <div class="uzicon">📄</div>
+            <h3>Study Material</h3>
+            <p class="usub">Drag & drop or click to browse</p>
+            <p class="utyp">PDF, DOCX, TXT, PNG, JPG, WEBP</p>
+          </div>
+          <div class="fbadge" id="study-file-badge">
+            <div class="fbhdr"><div class="fbchk">✓</div><span id="study-status-title">Files Selected</span></div>
+            <div class="fbnames" id="study-file-names"></div>
+            <button class="rmv" id="remove-study-btn">🗑 Remove All</button>
+          </div>
+        </div>
+
+        <!-- Syllabus -->
+        <div class="sylwrap">
+          <div class="sytabs">
+            <button class="sytab on" id="tab-syllabus-file">📎 Upload File</button>
+            <button class="sytab" id="tab-syllabus-text">✏️ Paste Text</button>
+          </div>
+          <div class="uz" id="syllabus-dropzone">
+            <input type="file" id="syllabus-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" class="fip">
+            <div class="uzi">
+              <div class="uzicon">📋</div>
+              <h3>Syllabus</h3>
+              <p class="usub">Drag & drop or click to browse</p>
+              <p class="utyp">PDF, DOCX, TXT, PNG, JPG, WEBP</p>
+            </div>
+            <div class="fbadge" id="syllabus-file-badge">
+              <div class="fbhdr"><div class="fbchk">✓</div><span>Syllabus Ready</span></div>
+              <div class="fbnames" id="syllabus-file-name"></div>
+              <button class="rmv" id="remove-syllabus-btn">🗑 Remove</button>
+            </div>
+          </div>
+          <div class="sylta hidden" id="syllabus-text-box">
+            <textarea id="syllabus-text-input" placeholder="Paste your syllabus here...&#10;&#10;Unit 1: Introduction to Machine Learning&#10;  1.1 Supervised Learning&#10;  1.2 Unsupervised Learning&#10;Unit 2: Neural Networks..."></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="optrow">
+        <div class="thrgrp">
+          <label>Similarity Threshold <span style="cursor:help;color:var(--ind)" title="Higher = stricter. Lower = more inclusive.">ⓘ</span></label>
+          <div class="srow">
+            <input type="range" id="threshold-slider" min="0.1" max="0.9" step="0.05" value="0.35">
+            <span class="sval" id="threshold-val">0.35</span>
+          </div>
+        </div>
+        <div class="toggrp">
+          <label class="toglbl" id="toggle-math-mode">
+            <input type="checkbox" id="chk-math-mode">
+            <span class="togswitch"></span>
+            <span>Enhanced Math Parsing</span>
+          </label>
+          <label class="toglbl" id="toggle-handwriting-mode">
+            <input type="checkbox" id="chk-handwriting-mode">
+            <span class="togswitch"></span>
+            <span>Handwriting OCR</span>
+          </label>
+        </div>
+      </div>
+
+      <button type="button" id="start-process-btn" class="btn-ext dis" disabled>
+        <span>✨ Extract & Match Notes</span>
+      </button>
     </div>
 
-    <!-- Navigation -->
-    <nav class="navbar">
-        <div class="nav-inner">
-            <div class="nav-logo">
-                <span class="nav-logo-icon">🧠</span>
-                <span class="nav-logo-text">Mento<span>.AI</span></span>
-            </div>
-            <div class="nav-links">
-                <a href="#features">Features</a>
-                <a href="#how-it-works">How It Works</a>
-                <a href="#app" class="nav-cta">Launch App</a>
-            </div>
+    <!-- Stage 2: Processing -->
+    <div id="processing-stage" class="stage">
+      <div class="procwrap">
+        <div class="orb">
+          <div class="ring"></div>
+          <div class="ring ring2"></div>
+          <div class="orbcore">🧠</div>
         </div>
-    </nav>
+        <h2 id="progress-status-title">Initializing AI Engine...</h2>
+        <p id="progress-status-sub">Please wait while Mento.AI processes your documents</p>
+        <div class="ptrack"><div class="pfill" id="progress-bar-fill"></div></div>
+        <div class="ppct" id="progress-pct">0%</div>
+      </div>
+    </div>
 
-    <!-- Hero Section -->
-    <section class="hero-section">
-        <div class="hero-content">
-            <div class="hero-pill">✨ AI-POWERED · ZERO DATA LOSS · SEMANTIC MATCHING</div>
-            <h1 class="hero-h1">Study Smarter.<br><span class="hero-gradient">Learn Everything.</span></h1>
-            <p class="hero-sub">Upload your study material and syllabus. Mento.AI's semantic AI engine extracts, maps, and compiles perfectly organized notes for every topic — with zero data loss.</p>
-            <div class="hero-btns">
-                <a href="#app" class="btn-primary-hero">
-                    <span>Start Extracting Free</span>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                </a>
-                <a href="#how-it-works" class="btn-ghost-hero">See How It Works</a>
-            </div>
-            <div class="hero-stats">
-                <div class="hero-stat"><span class="stat-num">500+</span><span class="stat-label">Students Helped</span></div>
-                <div class="hero-stat-div"></div>
-                <div class="hero-stat"><span class="stat-num">99.9%</span><span class="stat-label">Data Accuracy</span></div>
-                <div class="hero-stat-div"></div>
-                <div class="hero-stat"><span class="stat-num">10+</span><span class="stat-label">Formats Supported</span></div>
-            </div>
+    <!-- Stage 3: Preview -->
+    <div id="preview-stage" class="stage">
+      <div class="pvhdr">
+        <h2>Review Extracted Notes</h2>
+        <p>Uncheck any excerpts you don't want in your final document, then export.</p>
+      </div>
+      <div class="pvmeta">
+        <div class="pmi"><span class="pmilbl">Material:</span><span id="preview-study-file">—</span></div>
+        <div class="pmi"><span class="pmilbl">Syllabus:</span><span id="preview-syllabus-file">—</span></div>
+        <div class="pmi"><span class="pmilbl">Topics Matched:</span><span id="preview-total-matches">0</span></div>
+      </div>
+      <div class="racc" id="results-accordion"></div>
+      <div class="pvfoot">
+        <button class="btn-sm" id="back-to-upload-btn">← New Upload</button>
+        <div class="fmtpick">
+          <span>Format:</span>
+          <label class="fmtc on" id="choice-docx"><input type="radio" name="export_format" value="docx" checked><span>📄 DOCX</span></label>
+          <label class="fmtc" id="choice-pdf"><input type="radio" name="export_format" value="pdf"><span>📕 PDF</span></label>
         </div>
-        <div class="hero-visual">
-            <div class="hero-card-float">
-                <div class="hcf-header">
-                    <div class="hcf-dot green"></div>
-                    <div class="hcf-dot yellow"></div>
-                    <div class="hcf-dot red"></div>
-                    <span class="hcf-title">mento_ai_notes.docx</span>
-                </div>
-                <div class="hcf-body">
-                    <div class="hcf-topic">
-                        <div class="hcf-topic-label">Unit 1: Neural Networks</div>
-                        <div class="hcf-match"><div class="hcf-bar" style="width:92%"></div><span>92%</span></div>
-                        <div class="hcf-excerpt">A neural network is a series of algorithms that endeavors to recognize underlying relationships in a set of data through...</div>
-                    </div>
-                    <div class="hcf-topic">
-                        <div class="hcf-topic-label">Unit 2: Backpropagation</div>
-                        <div class="hcf-match"><div class="hcf-bar" style="width:87%"></div><span>87%</span></div>
-                        <div class="hcf-excerpt">Backpropagation is the algorithm used to calculate gradients of the loss function with respect to each weight...</div>
-                    </div>
-                    <div class="hcf-topic">
-                        <div class="hcf-topic-label">Unit 3: Gradient Descent</div>
-                        <div class="hcf-match"><div class="hcf-bar" style="width:79%"></div><span>79%</span></div>
-                        <div class="hcf-excerpt">Gradient descent is an optimization algorithm used to minimize the cost function by iteratively moving...</div>
-                    </div>
-                </div>
-                <div class="hcf-footer">
-                    <span class="hcf-badge">✓ Ready to Download</span>
-                </div>
-            </div>
+        <button class="btn-gen" id="generate-docx-btn">✨ Compile & Export</button>
+      </div>
+    </div>
+
+    <!-- Stage 4: Download -->
+    <div id="download-stage" class="stage">
+      <div class="dlwrap">
+        <div class="dlseal">✓</div>
+        <h2>Your Notes Are Ready!</h2>
+        <p>Perfectly organized, topic-by-topic — zero data loss.</p>
+        <div class="dlcard">
+          <div class="dlw">W</div>
+          <div class="dlinfo">
+            <strong id="download-filename">extracted_notes.docx</strong>
+            <span id="download-file-size">Ready for download</span>
+          </div>
         </div>
-    </section>
-
-    <!-- How It Works -->
-    <section class="steps-section" id="how-it-works">
-        <div class="section-wrap">
-            <div class="section-label">HOW IT WORKS</div>
-            <h2 class="section-h2">Three Steps to Perfect Notes</h2>
-            <div class="steps-grid">
-                <div class="step-card">
-                    <div class="step-num">01</div>
-                    <div class="step-icon">📄</div>
-                    <h3>Upload Study Material</h3>
-                    <p>Drop in your textbook, lecture notes, or scanned pages. PDF, DOCX, TXT, and images all work.</p>
-                    <div class="step-tag">PDF · DOCX · TXT · Images</div>
-                </div>
-                <div class="step-arrow">→</div>
-                <div class="step-card">
-                    <div class="step-num">02</div>
-                    <div class="step-icon">📋</div>
-                    <h3>Add Your Syllabus</h3>
-                    <p>Upload your syllabus file or paste it as text. Mento.AI parses every unit and topic automatically.</p>
-                    <div class="step-tag">File or Text Input</div>
-                </div>
-                <div class="step-arrow">→</div>
-                <div class="step-card">
-                    <div class="step-num">03</div>
-                    <div class="step-icon">✨</div>
-                    <h3>Download Your Notes</h3>
-                    <p>Get a beautifully formatted Word document or PDF with every topic mapped to its relevant content.</p>
-                    <div class="step-tag">DOCX · PDF Export</div>
-                </div>
-            </div>
+        <div class="dlacts">
+          <button class="btn-sm" id="restart-btn">↩ Start Over</button>
+          <a href="#" id="direct-download-link" class="btn-main">
+            <span>Download Notes</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </a>
         </div>
-    </section>
+      </div>
+    </div>
 
-    <!-- Features Bento Grid -->
-    <section class="bento-section" id="features">
-        <div class="section-wrap">
-            <div class="section-label">FEATURES</div>
-            <h2 class="section-h2">Engineered for Academic Excellence</h2>
-            <div class="bento-grid">
-                <div class="bento-card bento-large">
-                    <div class="bento-icon-wrap indigo">🧠</div>
-                    <h3>AI Semantic Matching</h3>
-                    <p>Powered by <code>all-MiniLM-L6-v2</code> sentence embeddings and FAISS vector search. Matches syllabus topics based on deep conceptual meaning — not just keywords.</p>
-                    <div class="bento-chips">
-                        <span class="bento-chip">SBERT</span>
-                        <span class="bento-chip">FAISS 384d</span>
-                        <span class="bento-chip">Cosine Similarity</span>
-                    </div>
-                </div>
-                <div class="bento-card">
-                    <div class="bento-icon-wrap violet">🖼️</div>
-                    <h3>RapidOCR Engine</h3>
-                    <p>Scanned PDFs, handwritten notes, and image syllabi are converted to text automatically — no Tesseract install needed.</p>
-                    <div class="bento-chips"><span class="bento-chip">PNG · JPG · WEBP</span></div>
-                </div>
-                <div class="bento-card">
-                    <div class="bento-icon-wrap cyan">⚡</div>
-                    <h3>Zero Data Loss</h3>
-                    <p>Every matched paragraph is fully preserved with page source, confidence score, and topic citation.</p>
-                    <div class="bento-chips"><span class="bento-chip">100% Preserved</span></div>
-                </div>
-                <div class="bento-card">
-                    <div class="bento-icon-wrap green">📑</div>
-                    <h3>Multi-Format Export</h3>
-                    <p>Export your organized notes as Microsoft Word (.docx) or PDF — printer-ready and revision-ready.</p>
-                    <div class="bento-chips"><span class="bento-chip">Word</span><span class="bento-chip">PDF</span></div>
-                </div>
-                <div class="bento-card bento-wide">
-                    <div class="bento-icon-wrap orange">📊</div>
-                    <h3>Real-Time Progress Streaming</h3>
-                    <p>Watch your notes being built live with a real-time progress feed powered by Server-Sent Events (SSE). No page refresh needed — see every parsing and matching step as it happens.</p>
-                    <div class="bento-chips">
-                        <span class="bento-chip">SSE Streaming</span>
-                        <span class="bento-chip">Live Progress</span>
-                        <span class="bento-chip">Background Processing</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
+  </div>
+</section>
 
-    <!-- ──────────────────────────────────────────── -->
-    <!-- THE APP INTERFACE -->
-    <!-- ──────────────────────────────────────────── -->
-    <section class="app-section" id="app">
-        <div class="section-wrap">
-            <div class="section-label">LAUNCH APP</div>
-            <h2 class="section-h2">Extract Your Notes Now</h2>
+<!-- Footer -->
+<footer>
+  <div class="fi">
+    <div class="flogo">
+      <span>🧠</span>
+      <span class="nlogo-text">Mento<span>.AI</span></span>
+    </div>
+    <p class="fcp">© 2026 Mento.AI — Neural Indigo Design System. Powered by SBERT, FAISS & RapidOCR.</p>
+    <div class="ftech">
+      <span>sentence-transformers</span><span>FAISS</span><span>FastAPI</span><span>RapidOCR</span><span>SSE Streaming</span>
+    </div>
+  </div>
+</footer>
 
-            <div class="app-card" id="main-interface">
+<script>
+/* ── Particles ── */
+const pc = document.getElementById('pc');
+const cx = pc.getContext('2d');
+let pts = [];
+function resPC() { pc.width = innerWidth; pc.height = innerHeight; }
+resPC(); window.addEventListener('resize', resPC);
+class Pt {
+  constructor() { this.reset(); }
+  reset() {
+    this.x = Math.random()*pc.width; this.y = Math.random()*pc.height;
+    this.r = Math.random()*1.5+.3; this.alpha = Math.random()*.5+.1;
+    this.dy = -(Math.random()*.3+.1); this.dx = (Math.random()-.5)*.4;
+    this.col = ['#6366f1','#a855f7','#06b6d4','#818cf8'][Math.floor(Math.random()*4)];
+  }
+  tick() {
+    this.x+=this.dx; this.y+=this.dy; this.alpha-=.001;
+    if(this.alpha<=0||this.y<0) this.reset();
+  }
+  draw() {
+    cx.beginPath(); cx.arc(this.x,this.y,this.r,0,Math.PI*2);
+    cx.fillStyle=this.col; cx.globalAlpha=this.alpha; cx.fill(); cx.globalAlpha=1;
+  }
+}
+for(let i=0;i<130;i++) pts.push(new Pt());
+(function animPts(){ cx.clearRect(0,0,pc.width,pc.height); pts.forEach(p=>{p.tick();p.draw();}); requestAnimationFrame(animPts); })();
 
-                <!-- STAGE 1: UPLOAD -->
-                <div id="upload-stage" class="stage-section active">
-                    <div class="upload-grid">
+/* ── Intersection Observer ── */
+const io = new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('vis'); }),{threshold:.1});
+document.querySelectorAll('.fiu').forEach(el=>io.observe(el));
 
-                        <!-- Study Material -->
-                        <div class="upload-zone" id="study-material-dropzone">
-                            <input type="file" id="study-material-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" multiple class="file-input">
-                            <div class="upload-zone-inner">
-                                <div class="uz-icon-wrap">📄</div>
-                                <h3>Study Material</h3>
-                                <p class="uz-sub">Drag & drop or click to browse</p>
-                                <p class="uz-types">PDF, DOCX, TXT, PNG, JPG, WEBP</p>
-                                <p class="uz-size">Up to 1 GB per file</p>
-                            </div>
-                            <div class="file-badge" id="study-file-badge">
-                                <div class="fb-header">
-                                    <div class="fb-check">✓</div>
-                                    <span id="study-status-title">Files Selected</span>
-                                </div>
-                                <div class="fb-names" id="study-file-names">filename.pdf</div>
-                                <button type="button" class="fb-remove" id="remove-study-btn">🗑 Remove All</button>
-                            </div>
-                        </div>
+/* ── App State ── */
+let studyFiles=[], syllabusFile=null, syllabusMode='file', taskId=null, rawResults=null;
+const API = window.location.origin;
 
-                        <!-- Syllabus -->
-                        <div class="syllabus-wrap">
-                            <div class="syl-tabs">
-                                <button class="syl-tab active" id="tab-syllabus-file">📎 Upload File</button>
-                                <button class="syl-tab" id="tab-syllabus-text">✏️ Paste Text</button>
-                            </div>
+/* ── DOM ── */
+const el = id => document.getElementById(id);
+const studyDZ = el('study-material-dropzone'), studyInp = el('study-material-input');
+const studyBadge = el('study-file-badge'), studyNames = el('study-file-names');
+const rmStudy = el('remove-study-btn');
+const tabFile = el('tab-syllabus-file'), tabText = el('tab-syllabus-text');
+const sylDZ = el('syllabus-dropzone'), sylInp = el('syllabus-input');
+const sylBadge = el('syllabus-file-badge'), sylName = el('syllabus-file-name');
+const rmSyl = el('remove-syllabus-btn'), sylTextBox = el('syllabus-text-box');
+const sylTA = el('syllabus-text-input');
+const thrSlider = el('threshold-slider'), thrVal = el('threshold-val');
+const startBtn = el('start-process-btn');
+const s1=el('upload-stage'), s2=el('processing-stage'), s3=el('preview-stage'), s4=el('download-stage');
+const pFill=el('progress-bar-fill'), pPct=el('progress-pct'), pTitle=el('progress-status-title');
+const accordion=el('results-accordion');
+const pvStudy=el('preview-study-file'), pvSyl=el('preview-syllabus-file'), pvTotal=el('preview-total-matches');
+const fmtDocx=el('choice-docx'), fmtPdf=el('choice-pdf');
+const genBtn=el('generate-docx-btn'), backBtn=el('back-to-upload-btn');
+const restartBtn=el('restart-btn'), dlLink=el('direct-download-link');
+const dlFilename=el('download-filename'), dlSize=el('download-file-size');
 
-                            <div class="upload-zone" id="syllabus-dropzone">
-                                <input type="file" id="syllabus-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" class="file-input">
-                                <div class="upload-zone-inner">
-                                    <div class="uz-icon-wrap">📋</div>
-                                    <h3>Syllabus</h3>
-                                    <p class="uz-sub">Drag & drop or click to browse</p>
-                                    <p class="uz-types">PDF, DOCX, TXT, PNG, JPG, WEBP</p>
-                                </div>
-                                <div class="file-badge" id="syllabus-file-badge">
-                                    <div class="fb-header">
-                                        <div class="fb-check">✓</div>
-                                        <span>Syllabus Ready</span>
-                                    </div>
-                                    <div class="fb-names" id="syllabus-file-name">syllabus.pdf</div>
-                                    <button type="button" class="fb-remove" id="remove-syllabus-btn">🗑 Remove</button>
-                                </div>
-                            </div>
+/* ── Stage Switch ── */
+function showStage(s) { [s1,s2,s3,s4].forEach(x=>x.classList.remove('on')); s.classList.add('on'); }
 
-                            <div class="syllabus-textbox hidden" id="syllabus-text-box">
-                                <textarea id="syllabus-text-input" placeholder="Paste your syllabus here...&#10;&#10;Unit 1: Introduction to Machine Learning&#10;  1.1 Supervised Learning&#10;  1.2 Unsupervised Learning&#10;Unit 2: Neural Networks..."></textarea>
-                            </div>
-                        </div>
-                    </div>
+/* ── Validity ── */
+function checkForm() {
+  const hasStudy = studyFiles.length>0;
+  const hasSyl = (syllabusMode==='file'&&syllabusFile)||(syllabusMode==='text'&&sylTA.value.trim().length>0);
+  if(hasStudy&&hasSyl) { startBtn.classList.remove('dis'); startBtn.disabled=false; }
+  else { startBtn.classList.add('dis'); startBtn.disabled=true; }
+}
 
-                    <!-- Options Row -->
-                    <div class="options-row">
-                        <div class="threshold-group">
-                            <label>Semantic Similarity Threshold
-                                <span class="tooltip-icon" title="Higher = stricter matching. Lower = more inclusive results.">ⓘ</span>
-                            </label>
-                            <div class="slider-row">
-                                <input type="range" id="threshold-slider" min="0.1" max="0.9" step="0.05" value="0.35">
-                                <span class="slider-val" id="threshold-val">0.35</span>
-                            </div>
-                        </div>
+/* ── Slider ── */
+thrSlider.addEventListener('input',()=>{ thrVal.textContent=thrSlider.value; });
 
-                        <div class="toggle-group">
-                            <label class="toggle-label" id="toggle-math-mode">
-                                <input type="checkbox" id="chk-math-mode">
-                                <span class="toggle-switch"></span>
-                                <span>Enhanced Math Parsing</span>
-                            </label>
-                            <label class="toggle-label" id="toggle-handwriting-mode">
-                                <input type="checkbox" id="chk-handwriting-mode">
-                                <span class="toggle-switch"></span>
-                                <span>Handwriting OCR</span>
-                            </label>
-                        </div>
-                    </div>
+/* ── Study Upload ── */
+function setStudyFiles(files) {
+  studyFiles = Array.from(files);
+  studyNames.textContent = studyFiles.map(f=>f.name).join(', ');
+  studyBadge.classList.add('show'); checkForm();
+}
+studyInp.addEventListener('change',e=>setStudyFiles(e.target.files));
+['dragover','dragenter'].forEach(ev=>studyDZ.addEventListener(ev,e=>{ e.preventDefault(); studyDZ.classList.add('over'); }));
+['dragleave','drop'].forEach(ev=>studyDZ.addEventListener(ev,e=>{ e.preventDefault(); studyDZ.classList.remove('over'); }));
+studyDZ.addEventListener('drop',e=>{ if(e.dataTransfer.files.length) setStudyFiles(e.dataTransfer.files); });
+rmStudy.addEventListener('click',e=>{ e.preventDefault(); studyFiles=[]; studyInp.value=''; studyBadge.classList.remove('show'); checkForm(); });
 
-                    <button type="button" id="start-process-btn" class="btn-extract disabled" disabled>
-                        <span>✨ Extract & Match Notes</span>
-                    </button>
-                </div>
+/* ── Syllabus Tabs ── */
+tabFile.addEventListener('click',()=>{
+  syllabusMode='file'; tabFile.classList.add('on'); tabText.classList.remove('on');
+  sylDZ.style.display=''; sylTextBox.classList.add('hidden'); checkForm();
+});
+tabText.addEventListener('click',()=>{
+  syllabusMode='text'; tabText.classList.add('on'); tabFile.classList.remove('on');
+  sylDZ.style.display='none'; sylTextBox.classList.remove('hidden'); checkForm();
+});
+sylTA.addEventListener('input', checkForm);
 
-                <!-- STAGE 2: PROCESSING -->
-                <div id="processing-stage" class="stage-section">
-                    <div class="processing-wrap">
-                        <div class="processing-orb">
-                            <div class="orb-ring"></div>
-                            <div class="orb-ring orb-ring-2"></div>
-                            <div class="orb-core">🧠</div>
-                        </div>
-                        <h2 id="progress-status-title">Initializing AI Engine...</h2>
-                        <p id="progress-status-sub">Please wait while Mento.AI processes your documents</p>
-                        <div class="progress-track">
-                            <div class="progress-fill" id="progress-bar-fill"></div>
-                        </div>
-                        <div class="progress-pct" id="progress-pct">0%</div>
-                    </div>
-                </div>
+/* ── Syllabus Upload ── */
+function setSylFile(files) {
+  syllabusFile = files[0];
+  sylName.textContent = syllabusFile.name;
+  sylBadge.classList.add('show'); checkForm();
+}
+sylInp.addEventListener('change',e=>setSylFile(e.target.files));
+['dragover','dragenter'].forEach(ev=>sylDZ.addEventListener(ev,e=>{ e.preventDefault(); sylDZ.classList.add('over'); }));
+['dragleave','drop'].forEach(ev=>sylDZ.addEventListener(ev,e=>{ e.preventDefault(); sylDZ.classList.remove('over'); }));
+sylDZ.addEventListener('drop',e=>{ if(e.dataTransfer.files.length) setSylFile(e.dataTransfer.files); });
+rmSyl.addEventListener('click',e=>{ e.preventDefault(); syllabusFile=null; sylInp.value=''; sylBadge.classList.remove('show'); checkForm(); });
 
-                <!-- STAGE 3: PREVIEW -->
-                <div id="preview-stage" class="stage-section">
-                    <div class="preview-header">
-                        <h2>Review Extracted Notes</h2>
-                        <p>Uncheck any excerpts you don't want in your final document, then export.</p>
-                    </div>
-                    <div class="preview-meta">
-                        <div class="pm-item"><span class="pm-label">Material:</span><span id="preview-study-file">study.pdf</span></div>
-                        <div class="pm-item"><span class="pm-label">Syllabus:</span><span id="preview-syllabus-file">syllabus.pdf</span></div>
-                        <div class="pm-item"><span class="pm-label">Topics Matched:</span><span id="preview-total-matches">0</span></div>
-                    </div>
-                    <div class="results-accordion" id="results-accordion"></div>
-                    <div class="preview-footer">
-                        <button type="button" id="back-to-upload-btn" class="btn-ghost">← New Upload</button>
-                        <div class="format-pick">
-                            <span>Format:</span>
-                            <label class="fmt-choice active" id="choice-docx">
-                                <input type="radio" name="export_format" value="docx" checked>
-                                <span>📄 DOCX</span>
-                            </label>
-                            <label class="fmt-choice" id="choice-pdf">
-                                <input type="radio" name="export_format" value="pdf">
-                                <span>📕 PDF</span>
-                            </label>
-                        </div>
-                        <button type="button" id="generate-docx-btn" class="btn-generate">
-                            <span>✨ Compile & Export</span>
-                        </button>
-                    </div>
-                </div>
+/* ── Format Toggle ── */
+[fmtDocx,fmtPdf].forEach(lbl=>{
+  lbl.querySelector('input').addEventListener('change',()=>{
+    fmtDocx.classList.remove('on'); fmtPdf.classList.remove('on');
+    lbl.classList.add('on');
+  });
+});
 
-                <!-- STAGE 4: DOWNLOAD -->
-                <div id="download-stage" class="stage-section">
-                    <div class="download-wrap">
-                        <div class="dl-seal">✓</div>
-                        <h2>Your Notes Are Ready!</h2>
-                        <p>Perfectly organized, topic-by-topic — zero data loss.</p>
-                        <div class="dl-card">
-                            <div class="dl-w-icon">W</div>
-                            <div class="dl-card-info">
-                                <strong id="download-filename">extracted_notes.docx</strong>
-                                <span id="download-file-size">Ready for download</span>
-                            </div>
-                        </div>
-                        <div class="dl-actions">
-                            <button type="button" id="restart-btn" class="btn-ghost">↩ Start Over</button>
-                            <a href="#" id="direct-download-link" class="btn-primary-hero">
-                                <span>Download Notes</span>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                            </a>
-                        </div>
-                    </div>
-                </div>
+/* ── Process ── */
+startBtn.addEventListener('click', async ()=>{
+  if(startBtn.classList.contains('dis')) return;
+  showStage(s2);
+  const fd = new FormData();
+  studyFiles.forEach(f=>fd.append('study_files',f));
+  if(syllabusMode==='file') fd.append('syllabus_file',syllabusFile);
+  else fd.append('syllabus_text',sylTA.value.trim());
+  fd.append('similarity_threshold',thrSlider.value);
+  fd.append('use_math_mode',el('chk-math-mode').checked);
+  fd.append('use_handwriting_ocr',el('chk-handwriting-ocr')?.checked||false);
+  try {
+    const res = await fetch(`${API}/api/process`,{method:'POST',body:fd});
+    if(!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    taskId = data.task_id;
+    listenSSE(taskId);
+  } catch(err) {
+    pTitle.textContent = '⚠️ Connection error — run the local server!';
+    document.getElementById('progress-status-sub').textContent = 'Open terminal and run: python run.py';
+    pFill.style.width='0%'; pPct.textContent='Error';
+  }
+});
 
-            </div>
-        </div>
-    </section>
+function listenSSE(id) {
+  const es = new EventSource(`${API}/api/progress/${id}`);
+  es.onmessage = e=>{
+    const d = JSON.parse(e.data);
+    pFill.style.width = (d.progress||0)+'%';
+    pPct.textContent = (d.progress||0)+'%';
+    pTitle.textContent = d.status_message||'Processing...';
+    if(d.status==='done') { es.close(); rawResults=d.results; showPreview(d); }
+    if(d.status==='error') { es.close(); pTitle.textContent='⚠️ '+d.status_message; }
+  };
+  es.onerror = ()=>{ es.close(); pTitle.textContent='⚠️ Lost connection to server.'; };
+}
 
-    <!-- Footer -->
-    <footer class="site-footer">
-        <div class="footer-inner">
-            <div class="footer-logo">
-                <span>🧠</span>
-                <span class="nav-logo-text">Mento<span>.AI</span></span>
-            </div>
-            <p class="footer-copy">© 2026 Mento.AI — Neural Indigo Design. Powered by SBERT, FAISS & RapidOCR.</p>
-            <div class="footer-tech">
-                <span>sentence-transformers</span>
-                <span>FAISS</span>
-                <span>FastAPI</span>
-                <span>RapidOCR</span>
-            </div>
-        </div>
-    </footer>
+function showPreview(data) {
+  const topics = data.results||[];
+  pvStudy.textContent  = studyFiles.map(f=>f.name).join(', ');
+  pvSyl.textContent    = syllabusMode==='file'?(syllabusFile?.name||'—'):'Pasted Text';
+  pvTotal.textContent  = topics.length;
+  accordion.innerHTML  = '';
+  topics.forEach((t,i)=>{
+    const item = document.createElement('div'); item.className='ai';
+    const excerpts = (t.excerpts||[]).map((ex,j)=>`
+      <div class="exblk">
+        <label><input type="checkbox" checked data-topic="${i}" data-ex="${j}">
+        <span class="extxt">${ex.text||ex}</span></label>
+      </div>`).join('');
+    item.innerHTML=`
+      <div class="aihdr" onclick="toggleAcc(this)">
+        <input type="checkbox" checked>
+        <span class="aititle">${t.topic||'Topic '+(i+1)}</span>
+        <span class="aiscore">${((t.score||.8)*100).toFixed(0)}% match</span>
+        <span class="aitog">▼</span>
+      </div>
+      <div class="aibody">${excerpts||'<p style="color:var(--mut);font-size:13px">No excerpts found.</p>'}</div>`;
+    accordion.appendChild(item);
+  });
+  showStage(s3);
+}
+window.toggleAcc = function(hdr) {
+  const body=hdr.nextElementSibling, tog=hdr.querySelector('.aitog');
+  body.classList.toggle('open'); tog.classList.toggle('open');
+};
 
-    <script src="js/app.js?v=5"></script>
-    <script>
-    // Particle Canvas
-    const canvas = document.getElementById('particle-canvas');
-    const ctx = canvas.getContext('2d');
-    let particles = [];
-
-    function resizeCanvas() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-    }
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
-
-    class Particle {
-        constructor() { this.reset(); }
-        reset() {
-            this.x = Math.random() * canvas.width;
-            this.y = Math.random() * canvas.height;
-            this.r = Math.random() * 1.5 + 0.3;
-            this.alpha = Math.random() * 0.5 + 0.1;
-            this.speed = Math.random() * 0.3 + 0.1;
-            this.dx = (Math.random() - 0.5) * 0.4;
-            this.dy = -this.speed;
-            this.color = ['#6366f1','#a855f7','#06b6d4','#818cf8'][Math.floor(Math.random()*4)];
-        }
-        update() {
-            this.x += this.dx;
-            this.y += this.dy;
-            this.alpha -= 0.001;
-            if (this.alpha <= 0 || this.y < 0) this.reset();
-        }
-        draw() {
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-            ctx.fillStyle = this.color;
-            ctx.globalAlpha = this.alpha;
-            ctx.fill();
-            ctx.globalAlpha = 1;
-        }
-    }
-
-    for (let i = 0; i < 120; i++) particles.push(new Particle());
-
-    function animateParticles() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        particles.forEach(p => { p.update(); p.draw(); });
-        requestAnimationFrame(animateParticles);
-    }
-    animateParticles();
-
-    // Scroll fade-in
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(e => {
-            if (e.isIntersecting) e.target.classList.add('visible');
-        });
-    }, { threshold: 0.1 });
-    document.querySelectorAll('.step-card, .bento-card, .hero-stat').forEach(el => {
-        el.classList.add('fade-in-up');
-        observer.observe(el);
+genBtn.addEventListener('click', async ()=>{
+  const fmt = document.querySelector('input[name=export_format]:checked').value;
+  const selected=[];
+  rawResults.forEach((t,i)=>{
+    const chk=document.querySelector(`.aihdr input[data-topic="${i}"]`)||accordion.querySelectorAll('.aihdr input[type=checkbox]')[i];
+    if(!chk||chk.checked) selected.push(t);
+  });
+  try {
+    const res=await fetch(`${API}/api/generate`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({task_id:taskId,format:fmt,selected_topics:selected.map(t=>t.topic)})
     });
-    </script>
+    if(!res.ok) throw new Error();
+    const blob=await res.blob();
+    const url=URL.createObjectURL(blob);
+    const fname=`mento_notes.${fmt}`;
+    dlLink.href=url; dlLink.download=fname;
+    dlFilename.textContent=fname;
+    dlSize.textContent=`${(blob.size/1024).toFixed(1)} KB`;
+    showStage(s4);
+  } catch { alert('Export failed. Make sure the local server is running.'); }
+});
+
+backBtn.addEventListener('click',()=>showStage(s1));
+restartBtn.addEventListener('click',()=>{ studyFiles=[]; syllabusFile=null; sylInp.value=''; studyInp.value=''; studyBadge.classList.remove('show'); sylBadge.classList.remove('show'); checkForm(); showStage(s1); });
+</script>
 </body>
 </html>
