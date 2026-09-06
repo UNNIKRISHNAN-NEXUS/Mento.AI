@@ -64,6 +64,9 @@ def get_rapidocr():
             logger.error(f"Failed to initialize RapidOCR: {e}")
     return _RAPIDOCR_INSTANCE
 
+# Public alias — imported by handwriting_ocr.py
+OCR_ENGINE_INSTANCE = get_rapidocr()
+
 def preprocess_image(image: Image.Image) -> Image.Image:
     """Enhance the image for better OCR accuracy."""
     try:

@@ -212,8 +212,6 @@ async def upload_files(
     )
     
     return {"task_id": task_id}
-    
-    return {"task_id": task_id}
 
 @app.get("/api/process/{task_id}")
 async def get_processing_status(task_id: str):

@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "outputDirectory": "frontend",
   "routes": [
     {
       "src": "/css/(.*)",
@@ -9,9 +8,6 @@
     {
       "src": "/js/(.*)",
       "dest": "/js/$1"
-    },
-    {
-      "handle": "filesystem"
     },
     {
       "src": "/(.*)",

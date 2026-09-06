@@ -88,6 +88,7 @@ def match_syllabus_to_document(
                     "type": matched_chunk["type"],
                     "source": matched_chunk["source"],
                     "score": round(score, 4),
+                    "similarity_score": round(score, 4),  # alias for frontend compatibility
                     "confidence_pct": round(score * 100, 1)
                 })
         

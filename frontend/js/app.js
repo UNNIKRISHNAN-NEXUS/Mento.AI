@@ -11,8 +11,12 @@ let syllabusMode = "file"; // "file" or "text"
 let taskId = null;
 let rawResults = null;
 
-// API Configurations
-const API_BASE = window.location.origin;
+// API Configuration — auto-detect local dev vs production
+// Local: backend runs on same origin (localhost:8000)
+// Vercel deployment: backend runs on Render.com
+const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? window.location.origin
+    : 'https://mento-ai-backend.onrender.com';
 
 // DOM Elements
 const studyDropzone = document.getElementById("study-material-dropzone");
@@ -199,7 +203,7 @@ function handleSyllabusFileSelect(file) {
 
 studyDropzone.addEventListener('drop', e => handleStudyFilesSelect(e.dataTransfer.files));
 studyDropzone.addEventListener('click', e => {
-    if (e.target.closest('.remove-file-btn') || e.target.closest('.selected-file-badge.show')) return;
+    if (e.target.closest('#remove-study-btn') || e.target.closest('.file-badge')) return;
     studyInput.click();
 });
 studyInput.addEventListener('change', e => handleStudyFilesSelect(e.target.files));
@@ -213,7 +217,7 @@ studyInput.addEventListener('change', e => handleStudyFilesSelect(e.target.files
 
 syllabusDropzone.addEventListener('drop', e => handleSyllabusFileSelect(e.dataTransfer.files[0]));
 syllabusDropzone.addEventListener('click', e => {
-    if (e.target.closest('.remove-file-btn') || e.target.closest('.selected-file-badge.show')) return;
+    if (e.target.closest('#remove-syllabus-btn') || e.target.closest('.file-badge')) return;
     syllabusInput.click();
 });
 syllabusInput.addEventListener('change', e => handleSyllabusFileSelect(e.target.files[0]));

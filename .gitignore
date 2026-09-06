@@ -33,3 +33,6 @@ Thumbs.db
 
 # Vercel Build Output
 .vercel/
+
+# Note: .agents/ is intentionally NOT ignored — it contains Antigravity IDE
+# workspace rules and skills that should be shared with all contributors.
