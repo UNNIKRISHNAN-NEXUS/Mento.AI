@@ -11,20 +11,26 @@ let syllabusMode = "file"; // "file" or "text"
 let taskId = null;
 let rawResults = null;
 
-// API Configuration — Auto-detect local, unified Vercel, or dual Vercel setup
+// API Configuration — Auto-detect local, unified Vercel, or live Render backend
 function getApiBaseUrl() {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
         return "";
-    }
-    // Dual Vercel deployment support: frontend on mento-ai-iota -> backend on mento-ai-app
-    if (window.location.hostname === 'mento-ai-iota.vercel.app') {
-        return 'https://mento-ai-app.vercel.app';
     }
     const savedUrl = localStorage.getItem("MENTO_BACKEND_URL");
     if (savedUrl && savedUrl.trim()) {
         return savedUrl.trim().replace(/\/+$/, '');
     }
-    return "";
+    // Default to live active Render backend
+    return 'https://mento-ai-backend-sc4k.onrender.com';
+}
+
+function setCustomBackendUrl(newUrl) {
+    if (newUrl && newUrl.trim()) {
+        const cleanUrl = newUrl.trim().replace(/\/+$/, '');
+        localStorage.setItem("MENTO_BACKEND_URL", cleanUrl);
+        return cleanUrl;
+    }
+    return getApiBaseUrl();
 }
 
 // DOM Elements
@@ -304,7 +310,18 @@ startProcessBtn.addEventListener("click", async () => {
         taskId = data.task_id;
         startProgressMonitoring(taskId);
     } catch (err) {
-        alert(`Error starting task: ${err.message}`);
+        if (err.message.includes("Failed to fetch") || err.name === "TypeError") {
+            const promptUrl = prompt(
+                `Backend connection error at:\n${apiBase}\n\nIf your backend URL is different (e.g. https://mento-ai-backend-sc4k.onrender.com), please enter it below:`,
+                apiBase || "https://mento-ai-backend-sc4k.onrender.com"
+            );
+            if (promptUrl && promptUrl.trim()) {
+                setCustomBackendUrl(promptUrl);
+                alert("Backend URL saved! Click 'Start Processing' again.");
+            }
+        } else {
+            alert(`Error starting task: ${err.message}`);
+        }
         showStage(uploadStage);
     }
 });
