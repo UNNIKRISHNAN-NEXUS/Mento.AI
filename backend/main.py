@@ -384,7 +384,10 @@ async def health_check():
         "tesseract_ocr_available": TESSERACT_AVAILABLE
     }
 
-# Serve frontend static files
-frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+# Serve frontend static files (checks frontend/ and public/)
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+frontend_dir = os.path.join(root_dir, "frontend")
+if not os.path.exists(frontend_dir):
+    frontend_dir = os.path.join(root_dir, "public")
 if os.path.exists(frontend_dir):
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
