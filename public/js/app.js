@@ -618,51 +618,146 @@ function clientParseSyllabus(rawText) {
     return topics;
 }
 
+// Strict Academic Heading Detection in Browser
+const CLIENT_INVALID_SINGLE_WORDS = new Set([
+    "the", "and", "where", "which", "using", "this", "following", "therefore",
+    "note", "example", "figure", "table", "because", "is", "are", "with", "from",
+    "that", "for", "about", "then", "such", "each", "between", "during", "signal",
+    "system", "method", "equation", "property", "value", "type", "types", "form",
+    "case", "point", "output", "input", "result", "characteristics", "function",
+    "definition", "introduction", "summary", "conclusion", "chapter", "unit",
+    "section", "module", "part", "page", "author", "university", "dr", "prof",
+    "also", "can", "could", "would", "should", "will", "shall", "may", "might",
+    "must", "has", "have", "had", "been", "being", "do", "does", "did", "done",
+    "etc", "viz", "ie", "eg", "below", "above", "given"
+]);
+
+function isClientValidAcademicHeading(str) {
+    if (!str) return false;
+    const s = str.trim();
+    if (s.length < 3 || s.length > 85) return false;
+    if (/[.,;?!]$/.test(s)) return false;
+
+    const unitPat = /^(?:UNIT|MODULE|CHAPTER|PART|SECTION)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE)[:\-\.\s]*(.*)$/i;
+    const uMatch = s.match(unitPat);
+    if (uMatch) {
+        const sub = (uMatch[2] || "").trim().replace(/^[:\-\.\s]+/, '');
+        return sub.length >= 3 || !sub;
+    }
+
+    const numPat = /^(\d+(?:\.\d+)*\.?|[A-Z]\.|\b[IVXLCDM]+\.?)\s+(.+)$/i;
+    const m = s.match(numPat);
+    const coreText = m ? m[2].trim() : s;
+    const coreClean = coreText.replace(/^[#*\-•\d\.\s\(\)\:\/]+/, '').trim();
+    if (coreClean.length < 3) return false;
+
+    const coreLower = coreClean.toLowerCase();
+    const words = coreClean.split(/\s+/);
+
+    if (words.length === 1) {
+        if (CLIENT_INVALID_SINGLE_WORDS.has(coreLower)) return false;
+        if (coreClean.length < 4 || coreClean[0] !== coreClean[0].toUpperCase()) return false;
+    }
+
+    if (words.length > 8) return false;
+
+    const sentenceStarters = [
+        /^(the|a|an)\s+[a-z]/,
+        /^there\s+(are|is|were|was)\b/,
+        /^this\s+(method|technique|approach|signal|system|paper|chapter|section|is|can|will|has)\b/,
+        /^these\s+(methods|signals|systems|techniques|are|were)\b/,
+        /^as\s+(shown|seen|discussed|mentioned|stated|described|defined)\b/,
+        /^it\s+(can|is|was|should|may|will|has)\b/,
+        /^in\s+(order|this|the|addition|contrast|general|other|such)\b/,
+        /^we\s+(have|can|see|define|observe|obtain|note|find)\b/,
+        /^let\s+us\b/,
+        /^consider\s+(the|a|an)\b/,
+        /^for\s+(example|instance)\b/,
+        /^note\s+that\b/,
+        /^because\s+of\b/,
+        /^which\s+(is|are|means|shows|conveys)\b/,
+        /^where\s+[a-zA-Z]/,
+        /^following\s+(are|is|the)\b/,
+        /^hence\b/,
+        /^thus\b/
+    ];
+    for (const pat of sentenceStarters) {
+        if (pat.test(coreLower)) return false;
+    }
+
+    const narrativeVerbs = [
+        /\b(is|are|was|were)\s+(defined|represented|used|calculated|shown|given|obtained|categorized|described|conveyed)\b/,
+        /\bcan\s+be\s+(used|seen|calculated|obtained|modeled|classified)\b/,
+        /\bconveys\s+information\b/,
+        /\bplays\s+an?\s+important\s+role\b/,
+        /\bconsists\s+of\b/,
+        /\brefers\s+to\b/
+    ];
+    for (const vp of narrativeVerbs) {
+        if (vp.test(coreLower)) return false;
+    }
+
+    const boilerplate = ["copyright", "rights reserved", "page ", "university", "department", "author", "isbn", "http", "www.", "@", "email", "all rights"];
+    if (boilerplate.some(bp => coreLower.includes(bp))) return false;
+
+    if (m && words.length >= 1) return true;
+
+    const isTitleStructure = coreClean === coreClean.toUpperCase() ||
+        words.every(w => w.length <= 3 || w[0] === w[0].toUpperCase()) ||
+        words.some(w => w[0] === w[0].toUpperCase());
+
+    if (isTitleStructure) {
+        if (words.some(w => w.length >= 4 && !CLIENT_INVALID_SINGLE_WORDS.has(w.toLowerCase()))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Helper: Extract candidate headings from chunks in browser
 function clientExtractCandidateHeadings(chunks) {
     const candidates = [];
     const seen = new Set();
-    const headingPatterns = [
-        /^(?:UNIT|MODULE|CHAPTER|PART|SECTION)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE)[:\-\.\s\s]+(.*)$/i,
-        /^(\d+(?:\.\d+)+)\.?\s+([A-Z].*)$/,
-        /^([A-Z][a-zA-Z0-9\s\-\(\)\/\,\&]{3,65}):\s*$/
-    ];
 
     chunks.forEach(chunk => {
+        if (chunk.heading && isClientValidAcademicHeading(chunk.heading)) {
+            const norm = chunk.heading.toLowerCase().trim();
+            if (!seen.has(norm)) {
+                seen.add(norm);
+                candidates.push({
+                    title: chunk.heading,
+                    hierarchy_number: chunk.hierarchy_number || "",
+                    chunk: chunk
+                });
+            }
+        }
+
         const lines = chunk.text.split(/\r?\n/);
         lines.forEach(line => {
             const str = line.trim();
-            if (str.length < 3 || str.length > 80) return;
-            let titleFound = null;
+            if (!isClientValidAcademicHeading(str)) return;
+
+            let titleFound = str;
             let hierarchyNum = "";
 
-            for (const pat of headingPatterns) {
-                const m = str.match(pat);
-                if (m) {
-                    if (m.length === 3) {
-                        hierarchyNum = m[1].trim();
-                        titleFound = m[2].trim();
-                    } else if (m.length === 2) {
-                        titleFound = m[1].trim();
-                    }
-                    break;
-                }
-            }
-
-            if (!titleFound) {
-                if (str === str.toUpperCase() && str.length >= 4 && str.length <= 60 && !str.endsWith(".")) {
-                    titleFound = str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-                } else if (/^[A-Z][a-zA-Z0-9\s\-]{3,50}$/.test(str) && !str.endsWith(".")) {
-                    const words = str.split(/\s+/);
-                    if (words.length >= 1 && words.length <= 7 && !["the", "this", "and", "or", "in", "with", "from"].includes(words[0].toLowerCase())) {
-                        titleFound = str;
-                    }
+            const uMatch = str.match(/^(?:UNIT|MODULE|CHAPTER|PART|SECTION)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE)[:\-\.\s]*(.*)$/i);
+            if (uMatch) {
+                const sub = (uMatch[2] || "").trim().replace(/^[:\-\.\s]+/, '');
+                hierarchyNum = `Unit ${uMatch[1]}`;
+                titleFound = sub || hierarchyNum;
+            } else {
+                const numMatch = str.match(/^(\d+(?:\.\d+)*\.?|[A-Z]\.|\b[IVXLCDM]+\.?)\s+(.+)$/i);
+                if (numMatch) {
+                    hierarchyNum = numMatch[1].replace(/\.$/, '');
+                    titleFound = numMatch[2].replace(/^[:\-\.\s]+/, '').trim();
+                } else {
+                    titleFound = str.replace(/^[#*\-•\d\.\s\(\)\:\/]+/, '').replace(/[:\s]+$/, '').trim();
                 }
             }
 
             if (titleFound && titleFound.length >= 3) {
                 const norm = titleFound.toLowerCase().trim();
-                if (!seen.has(norm) && !["page", "figure", "table", "university", "author", "isbn"].some(k => norm.includes(k))) {
+                if (!seen.has(norm)) {
                     seen.add(norm);
                     candidates.push({
                         title: titleFound,
@@ -853,36 +948,6 @@ function clientTfidfMatching(topics, chunks, threshold = 0.35, topK = 5) {
                 }]
             });
         }
-    });
-
-    // Remaining unmatched chunks
-    const remainingUnmatched = chunks.filter(c => !matchedChunkIds.has(c.chunk_id));
-    remainingUnmatched.forEach(c => {
-        const lines = c.text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length >= 4);
-        const rawTitle = lines.length > 0 ? lines[0].substring(0, 60) : `Additional Notes (${c.source} Page ${c.page_number})`;
-        const cleanTitle = rawTitle.replace(/^[#*\-•\d\.\s]+/, "").trim() || `Additional Notes (${c.source} Page ${c.page_number})`;
-
-        otherTopics.push({
-            topic_id: `other_topic_${otherTopicIdx++}`,
-            title: cleanTitle,
-            unit: "Other Topics Found in Study Material",
-            section: "General Notes",
-            hierarchy_number: "*",
-            full_context: `Other Topics > ${cleanTitle}`,
-            is_other_topic: true,
-            similarity_score: 0.85,
-            confidence_pct: 85.0,
-            matches: [{
-                chunk_id: c.chunk_id,
-                text: c.text,
-                page_number: c.page_number,
-                type: c.type,
-                source: c.source,
-                score: 0.85,
-                similarity_score: 0.85,
-                confidence_pct: 85.0
-            }]
-        });
     });
 
     return {
@@ -1101,7 +1166,9 @@ function createTopicAccordionItem(topic, defaultChecked = true) {
             chk.type = "checkbox";
             chk.className = "excerpt-chk";
             chk.checked = defaultChecked;
-            chk.id = `chk-${topic.topic_id}-${match.chunk_id}`;
+            chk.dataset.topicId = topic.topic_id;
+            chk.dataset.chunkId = match.chunk_id;
+            chk.id = `chk-${topic.topic_id}-${match.chunk_id}`.replace(/[^\w-]/g, '_');
 
             const chkSpan = document.createElement("span");
             chkSpan.textContent = ` Include Excerpt #${mIdx + 1} (${match.source} Page ${match.page_number})`;
@@ -1303,7 +1370,14 @@ generateDocxBtn.addEventListener("click", async () => {
         if (topic.matches) {
             topic.matches.forEach(match => {
                 if (itemEl) {
-                    const chk = itemEl.querySelector(`#chk-${topic.topic_id}-${match.chunk_id}`);
+                    const excerptChks = itemEl.querySelectorAll('.excerpt-chk');
+                    let chk = null;
+                    for (const ec of excerptChks) {
+                        if (ec.dataset.chunkId === match.chunk_id) {
+                            chk = ec;
+                            break;
+                        }
+                    }
                     if (chk && chk.checked && match.text && match.text.trim()) {
                         filteredMatches.push(match);
                     }

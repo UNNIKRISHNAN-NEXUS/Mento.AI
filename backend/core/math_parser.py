@@ -135,7 +135,7 @@ def format_math_text(text: str) -> str:
     # Convert LaTeX to Unicode
     formatted = convert_latex_to_unicode(text)
     
-    # Clean double spaces or broken formatting
-    formatted = re.sub(r"\s+", " ", formatted).strip()
+    # Clean double spaces or broken formatting (preserve newlines)
+    formatted = re.sub(r"[ \t]+", " ", formatted).strip()
     
     return formatted

@@ -9,6 +9,8 @@ import re
 import logging
 from typing import List
 
+from backend.core.heading_detector import is_valid_academic_heading
+
 logger = logging.getLogger("post_processor")
 
 # Common OCR Confusable Replacements (Word-level regexes)
@@ -58,14 +60,15 @@ def fix_ocr_spelling(text: str) -> str:
         
     text = re.sub(r'\b[a-zA-Z]*1[a-zA-Z]+\b', replace_1_with_l, text)
     
-    # Fix '0' substituted for 'O' inside uppercase words (e.g. 'PR0CESS' -> 'PROCESS')
+    # Fix '0' substituted for 'O' inside uppercase words of 4+ letters (e.g. 'PR0CESS' -> 'PROCESS')
     def replace_0_with_O(match):
         word = match.group(0)
-        if re.search(r'[A-Z]0[A-Z]', word):
+        # Avoid math variables like X0Y or R0C
+        if len(word) >= 4 and re.search(r'[A-Z]0[A-Z]', word):
             return word.replace('0', 'O')
         return word
         
-    text = re.sub(r'\b[A-Z]*0[A-Z]+\b', replace_0_with_O, text)
+    text = re.sub(r'\b[A-Z]{2,}0[A-Z]+\b', replace_0_with_O, text)
     
     return text
 
@@ -92,11 +95,12 @@ def unwrap_line_breaks(text: str) -> str:
                 current_para = []
             continue
             
-        # Determine if this line is a structural heading or bullet point
+        # Determine if this line is a structural heading, bullet point, or equation
         is_bullet = bool(re.match(r'^([\•\-\*\d+\.]|\([a-z0-9]+\))\s+', line))
-        is_heading = len(line) < 60 and line.isupper() and not line.endswith('.')
+        is_heading = is_valid_academic_heading(line)
+        is_eq = bool(re.search(r'(=|→|⇒|∫|∑|∏|√|sin|cos|tan|log)\s', line))
         
-        if is_bullet or is_heading:
+        if is_bullet or is_heading or is_eq:
             if current_para:
                 unwrapped_paragraphs.append(" ".join(current_para))
                 current_para = []
@@ -124,6 +128,7 @@ def clean_and_normalize_text(text: str) -> str:
     """
     Master post-processing pipeline for extracted text.
     Corrects spelling, unwraps line breaks, removes noise characters, and formats spacing.
+    Preserves math equations, exponents, and subscript notations.
     """
     if not text:
         return ""
@@ -140,8 +145,8 @@ def clean_and_normalize_text(text: str) -> str:
     processed = re.sub(r'\([ \t]+', '(', processed)
     processed = re.sub(r'[ \t]+\)', ')', processed)
     
-    # 4. Remove isolated OCR noise characters (e.g., lone '|', '~', '^', '_')
-    processed = re.sub(r'(?:\A|\s)[\|~\^_\¬\¦](?=\s|\Z)', ' ', processed)
+    # 4. Remove isolated OCR noise characters (lone '|', '~', '¬', '¦') without removing '^' or '_'
+    processed = re.sub(r'(?:\A|\s)[\|~¬¦](?=\s|\Z)', ' ', processed)
     
     # 5. Normalize paragraph spacing
     processed = re.sub(r'\n{3,}', '\n\n', processed)

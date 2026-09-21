@@ -184,30 +184,31 @@ OCR_ENGINE_INSTANCE = None
 
 def preprocess_image(image: Image.Image) -> Image.Image:
     """
-    Improve image quality before OCR.
+    Improve image quality before OCR using gentle, non-destructive enhancements.
+    Preserves fine lines for mathematical symbols, fractions, and diagrams.
     """
-
     try:
-
+        # Upscale if low resolution (under 1200px width/height)
+        w, h = image.size
+        if w < 1200 or h < 1200:
+            scale = min(2.0, 1600.0 / max(w, h))
+            if scale > 1.1:
+                image = image.resize((int(w * scale), int(h * scale)), Image.Resampling.BICUBIC)
+                
+        # Grayscale
         gray = image.convert("L")
 
+        # Gentle contrast enhancement (1.3x avoids blowing out thin equation lines)
         enhancer = ImageEnhance.Contrast(gray)
+        enhanced = enhancer.enhance(1.35)
 
-        enhanced = enhancer.enhance(2.0)
-
-        normalized = ImageOps.autocontrast(
-            enhanced
-        )
+        # Autocontrast normalization to maximize dynamic range
+        normalized = ImageOps.autocontrast(enhanced, cutoff=0.5)
 
         return normalized
 
     except Exception as exc:
-
-        logger.error(
-            "Image preprocessing error: %s",
-            exc
-        )
-
+        logger.error("Image preprocessing error: %s", exc)
         return image
 
 
@@ -218,43 +219,49 @@ def preprocess_image(image: Image.Image) -> Image.Image:
 def _extract_with_rapidocr(
     image: Image.Image
 ) -> str:
-
+    """
+    Extract text using RapidOCR (ONNX).
+    Uses primary RGB scan with intelligent preprocessed fallback.
+    """
     engine = get_rapidocr()
-
     if engine is None:
         return ""
 
     try:
-
-        img_array = np.array(
-            image.convert("RGB")
-        )
-
+        # 1. Primary pass with RGB
+        img_array = np.array(image.convert("RGB"))
         result, _ = engine(img_array)
+
+        # 2. Fallback pass with preprocessed image if faint/empty
+        if not result:
+            proc_img = preprocess_image(image)
+            img_array = np.array(proc_img.convert("RGB"))
+            result, _ = engine(img_array)
 
         if not result:
             return ""
 
+        # Sort OCR boxes by vertical position (top-to-bottom reading order)
+        def get_box_top(item):
+            try:
+                # item[0] is polygon coords [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+                return float(item[0][0][1])
+            except Exception:
+                return 0.0
+
+        sorted_result = sorted(result, key=get_box_top)
+
         lines = []
-
-        for line in result:
-
+        for line in sorted_result:
             if line and len(line) > 1:
-
                 text = line[1]
-
-                if text:
-                    lines.append(str(text))
+                if text and str(text).strip():
+                    lines.append(str(text).strip())
 
         return "\n".join(lines).strip()
 
     except Exception as exc:
-
-        logger.exception(
-            "RapidOCR extraction error: %s",
-            exc
-        )
-
+        logger.exception("RapidOCR extraction error: %s", exc)
         return ""
 
 

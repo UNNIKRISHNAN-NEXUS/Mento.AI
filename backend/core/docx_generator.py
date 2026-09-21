@@ -149,6 +149,7 @@ def generate_docx(
         
         current_unit = None
         total_topics_added = 0
+        total_written_chars = 0
         
         for idx, result in enumerate(matched_results):
             raw_matches = result.get("matches", [])
@@ -194,6 +195,7 @@ def generate_docx(
                 
                 # Excerpt Body Text
                 text_content = match["text"]
+                total_written_chars += len(text_content)
                 paragraphs = text_content.split("\n\n")
                 
                 for text_block in paragraphs:
@@ -209,12 +211,13 @@ def generate_docx(
                     run.font.size = Pt(12)
                     run.font.color.rgb = COLOR_BLACK
 
-        if total_topics_added == 0:
-            p_empty = doc.add_paragraph()
-            p_empty.add_run("No notes content available for the selected topics.")
+        if total_topics_added == 0 or total_written_chars < 50:
+            raise ValueError(
+                f"Generated document contains no meaningful extracted notes (total_chars={total_written_chars})."
+            )
             
         doc.save(output_path)
-        logger.info(f"DOCX successfully saved at {output_path} with {total_topics_added} topics.")
+        logger.info(f"[DOCX] written_chars={total_written_chars} across {total_topics_added} topics saved to {output_path}")
         return True
         
     except Exception as e:
@@ -318,15 +321,22 @@ def generate_pdf(
             spaceAfter=6
         )
         
+        def xml_safe(t: str) -> str:
+            if not t:
+                return ""
+            s = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', str(t))
+            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
         story = []
         
         # Title Block
-        story.append(Paragraph(f"MENTO.AI — {title.upper()}", title_style))
-        story.append(Paragraph(f"{description} | Generated on {datetime.now().strftime('%B %d, %Y')}", desc_style))
+        story.append(Paragraph(xml_safe(f"MENTO.AI — {title.upper()}"), title_style))
+        story.append(Paragraph(xml_safe(f"{description} | Generated on {datetime.now().strftime('%B %d, %Y')}"), desc_style))
         story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceBefore=0, spaceAfter=14))
         
         current_unit = None
         total_topics_added = 0
+        total_written_chars = 0
         
         for result in matched_results:
             raw_matches = result.get("matches", [])
@@ -340,7 +350,7 @@ def generate_pdf(
             
             if unit_name != current_unit:
                 current_unit = unit_name
-                story.append(Paragraph(current_unit.upper(), unit_style))
+                story.append(Paragraph(xml_safe(current_unit.upper()), unit_style))
                 
             topic_number = result.get("hierarchy_number", "")
             topic_title = result.get("title", "")
@@ -349,26 +359,28 @@ def generate_pdf(
             else:
                 heading_text = f"Topic: {topic_title}"
                 
-            story.append(Paragraph(heading_text, topic_style))
+            story.append(Paragraph(xml_safe(heading_text), topic_style))
                 
             for match in matches:
                 meta_text = f"Source: {match['source']} | Page: {match['page_number']}"
-                story.append(Paragraph(meta_text, meta_style))
+                story.append(Paragraph(xml_safe(meta_text), meta_style))
                 
-                paragraphs = match["text"].split("\n\n")
+                text_content = match["text"]
+                total_written_chars += len(text_content)
+                paragraphs = text_content.split("\n\n")
                 for p_text in paragraphs:
                     clean_p = p_text.strip()
                     if not clean_p:
                         continue
-                    # Escape XML characters for ReportLab Paragraph
-                    safe_text = clean_p.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    story.append(Paragraph(safe_text, body_style))
+                    story.append(Paragraph(xml_safe(clean_p), body_style))
                     
-        if total_topics_added == 0:
-            story.append(Paragraph("No notes content available for the selected topics.", body_style))
+        if total_topics_added == 0 or total_written_chars < 50:
+            raise ValueError(
+                f"Generated document contains no meaningful extracted notes (total_chars={total_written_chars})."
+            )
             
         doc.build(story)
-        logger.info(f"PDF successfully saved at {output_path} with {total_topics_added} topics.")
+        logger.info(f"[PDF] written_chars={total_written_chars} across {total_topics_added} topics saved to {output_path}")
         return True
         
     except Exception as e:

@@ -77,6 +77,9 @@ def run_extraction_pipeline(
         # 2. Parse study materials (supports multiple files)
         all_chunks = []
         total_files = len(study_files_info)
+        total_extracted_pages = 0
+        total_native_chars = 0
+        total_ocr_pages = 0
         
         for idx, item in enumerate(study_files_info):
             file_path = item["path"] if isinstance(item, dict) else item
@@ -99,14 +102,28 @@ def run_extraction_pipeline(
             )
             all_chunks.extend(chunks)
             
+            # Count extraction metrics
+            for c in chunks:
+                total_extracted_pages = max(total_extracted_pages, c.get("page_number", 1))
+                if c.get("type") in ["ocr", "handwriting_ocr"]:
+                    total_ocr_pages += 1
+                else:
+                    total_native_chars += len(c.get("text", ""))
+            
         if not all_chunks:
             raise ValueError("No text could be extracted from the uploaded study material(s).")
             
+        headings_detected = sum(1 for c in all_chunks if c.get("is_structured_section"))
+        logger.info(f"[EXTRACTION] files={total_files} pages={total_extracted_pages} native_text_chars={total_native_chars}")
+        if total_ocr_pages > 0:
+            logger.info(f"[OCR] pages_processed={total_ocr_pages}")
+        logger.info(f"[HEADINGS] detected={headings_detected}")
+        logger.info(f"[CHUNKS] total={len(all_chunks)}")
+        
         tasks_progress[task_id] = {
             "status": "Initializing AI semantic vector matching...",
             "progress": 70
         }
-        logger.info(f"Task {task_id}: Study materials parsed. Total {len(all_chunks)} chunks pooled.")
         
         # 3. Match syllabus to document + Detect Other Topics from study material
         match_data = match_syllabus_to_document(
@@ -115,6 +132,11 @@ def run_extraction_pipeline(
             similarity_threshold=threshold,
             top_k=5
         )
+        
+        syllabus_matches_count = len([t for t in match_data.get("syllabus_topics", []) if t.get("matches")])
+        other_topics_count = len(match_data.get("other_topics", []))
+        logger.info(f"[MATCHING] syllabus_matches={syllabus_matches_count}")
+        logger.info(f"[OTHER_TOPICS] valid={other_topics_count}")
         
         # Store structured results in-memory and on disk (for cross-instance serverless retrieval)
         study_display_names = [
@@ -342,7 +364,7 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
         for topic in all_stored_topics:
             if topic.get("topic_id") in selected_set:
                 custom_topic = next((ct for ct in client_custom_topics if ct.get("topic_id") == topic["topic_id"]), None)
-                if custom_topic and "matches" in custom_topic:
+                if custom_topic and "matches" in custom_topic and len(custom_topic["matches"]) > 0:
                     topic_copy = dict(topic)
                     topic_copy["matches"] = custom_topic["matches"]
                     final_selected_topics.append(topic_copy)
@@ -350,7 +372,7 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
                     final_selected_topics.append(topic)
     elif client_custom_topics:
         for ct in client_custom_topics:
-            if ct.get("matches"):
+            if ct.get("matches") and len(ct["matches"]) > 0:
                 final_selected_topics.append(ct)
     else:
         final_selected_topics = [t for t in all_stored_topics if t.get("matches")]
@@ -372,6 +394,10 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
             status_code=400,
             detail="Some selected topics do not contain extractable source content. Please review the selection and try again."
         )
+        
+    total_source_chars = sum(len(m.get("text", "")) for t in valid_topics for m in t.get("matches", []))
+    logger.info(f"[SELECTION] selected={len(valid_topics)}")
+    logger.info(f"[GENERATOR] source_chars={total_source_chars}")
         
     _, output_path = get_task_paths(task_id)
     
