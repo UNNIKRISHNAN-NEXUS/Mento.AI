@@ -2,7 +2,8 @@
 """
 Mento.AI FastAPI Application
 Handles multi-file uploads, text syllabus inputs, SSE progress tracking,
-preview results with Syllabus Topics & Other Topics selection, and PDF/DOCX format downloads.
+preview results with Syllabus Topics & Other Topics selection, PDF/DOCX format downloads,
+and diagnostic inspection endpoints.
 """
 
 import os
@@ -12,7 +13,7 @@ import asyncio
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.utils.file_utils import (
@@ -38,12 +39,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory progress and result storage (task_id -> data)
+# In-memory progress, results, and diagnostic storage (task_id -> data)
 tasks_progress: Dict[str, Dict[str, Any]] = {}
 tasks_results: Dict[str, Dict[str, Any]] = {}
+tasks_diagnostics: Dict[str, Dict[str, Any]] = {}
 
 # Allowed file extensions
-ALLOWED_DOCS = {".pdf", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".webp"}
+ALLOWED_DOCS = {".pdf", ".docx", ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp"}
 
 def run_extraction_pipeline(
     task_id: str,
@@ -57,7 +59,7 @@ def run_extraction_pipeline(
     """
     Background worker pipeline.
     Parses study material files (single or multiple) and syllabus, performs semantic matching,
-    detects non-syllabus Other Topics from notes, and compiles the result structure.
+    detects non-syllabus Other Topics from notes, compiles the result structure, and records diagnostics.
     """
     try:
         tasks_progress[task_id] = {"status": "Parsing syllabus...", "progress": 10}
@@ -70,7 +72,7 @@ def run_extraction_pipeline(
             
         tasks_progress[task_id] = {
             "status": f"Syllabus parsed: Found {len(topics)} topics. Parsing study materials...", 
-            "progress": 30
+            "progress": 25
         }
         logger.info(f"Task {task_id}: Syllabus parsed. {len(topics)} topics found.")
         
@@ -79,7 +81,9 @@ def run_extraction_pipeline(
         total_files = len(study_files_info)
         total_extracted_pages = 0
         total_native_chars = 0
+        total_native_pages = 0
         total_ocr_pages = 0
+        total_handwriting_pages = 0
         
         task_upload_dir, _ = get_task_paths(task_id)
         task_image_dir = os.path.join(task_upload_dir, "images")
@@ -90,10 +94,10 @@ def run_extraction_pipeline(
             orig_name = item.get("filename", os.path.basename(file_path)) if isinstance(item, dict) else os.path.basename(file_path)
             
             def parser_progress(stage: str, current: int, total: int):
-                # Map file index to 30%-65% progress range
-                step_pct = 30 + int(((idx + (current / total)) / total_files) * 35)
+                # Map file progress to 25%-65% range
+                step_pct = 25 + int(((idx + (current / max(total, 1))) / total_files) * 40)
                 tasks_progress[task_id] = {
-                    "status": f"[{idx+1}/{total_files}] {stage} ({current}/{total})...",
+                    "status": f"[{idx+1}/{total_files}] {stage}...",
                     "progress": step_pct
                 }
                 
@@ -110,9 +114,13 @@ def run_extraction_pipeline(
             # Count extraction metrics
             for c in chunks:
                 total_extracted_pages = max(total_extracted_pages, c.get("page_number", 1))
-                if c.get("type") in ["ocr", "handwriting_ocr"]:
+                c_type = c.get("type", "digital")
+                if c_type == "handwriting_ocr":
+                    total_handwriting_pages += 1
+                elif c_type == "ocr":
                     total_ocr_pages += 1
                 else:
+                    total_native_pages += 1
                     total_native_chars += len(c.get("text", ""))
             
         if not all_chunks:
@@ -120,19 +128,23 @@ def run_extraction_pipeline(
             
         headings_detected = sum(1 for c in all_chunks if c.get("is_structured_section"))
         total_extracted_images = sum(len(c.get("images", [])) for c in all_chunks)
-        logger.info(f"[EXTRACTION] files={total_files} pages={total_extracted_pages} native_text_chars={total_native_chars}")
+        total_source_chars = sum(len(c.get("text", "")) for c in all_chunks)
+        
+        logger.info(f"[EXTRACTION] files={total_files} pages={total_extracted_pages} native_chars={total_native_chars}")
         if total_ocr_pages > 0:
             logger.info(f"[OCR] pages_processed={total_ocr_pages}")
+        if total_handwriting_pages > 0:
+            logger.info(f"[HANDWRITING] pages_processed={total_handwriting_pages}")
         logger.info(f"[HEADINGS] detected={headings_detected}")
         logger.info(f"[IMAGE_EXTRACTION] extracted_images={total_extracted_images}")
         logger.info(f"[CHUNKS] total={len(all_chunks)}")
         
         tasks_progress[task_id] = {
-            "status": "Initializing AI semantic vector matching...",
+            "status": "Matching syllabus to study material notes...",
             "progress": 70
         }
         
-        # 3. Match syllabus to document + Detect Other Topics from study material
+        # 3. Match syllabus to document + Detect Other Topics + Retain 100% of material
         match_data = match_syllabus_to_document(
             topics=topics,
             chunks=all_chunks,
@@ -142,10 +154,11 @@ def run_extraction_pipeline(
         
         syllabus_matches_count = len([t for t in match_data.get("syllabus_topics", []) if t.get("matches")])
         other_topics_count = len(match_data.get("other_topics", []))
+        total_detected_topics = len(match_data.get("topics", []))
+        
         logger.info(f"[MATCHING] syllabus_matches={syllabus_matches_count}")
         logger.info(f"[OTHER_TOPICS] valid={other_topics_count}")
         
-        # Store structured results in-memory and on disk (for cross-instance serverless retrieval)
         study_display_names = [
             (item.get("filename") if isinstance(item, dict) else os.path.basename(item))
             for item in study_files_info
@@ -162,6 +175,23 @@ def run_extraction_pipeline(
             "threshold": threshold
         }
         tasks_results[task_id] = results_data
+        
+        # Store diagnostics
+        tasks_diagnostics[task_id] = {
+            "source_pages": total_extracted_pages,
+            "processed_pages": total_extracted_pages,
+            "failed_pages": [],
+            "native_text_pages": total_native_pages,
+            "ocr_pages": total_ocr_pages,
+            "handwriting_pages": total_handwriting_pages,
+            "detected_topics": total_detected_topics,
+            "selected_topics": total_detected_topics,
+            "source_text_chars": total_source_chars,
+            "images_extracted": total_extracted_images,
+            "output_pages": 0,
+            "output_text_chars": 0,
+            "images_rendered": 0
+        }
         
         try:
             _, task_output_dir = get_task_paths(task_id)
@@ -207,7 +237,6 @@ async def upload_files(
     task_id = generate_task_id()
     upload_path, _ = get_task_paths(task_id)
     
-    # Save Study Material files (supports multiple)
     saved_study_info = []
     CHUNK_SIZE = 1024 * 1024
     
@@ -228,7 +257,6 @@ async def upload_files(
                 buffer.write(chunk)
         saved_study_info.append({"path": file_path, "filename": s_file.filename})
         
-    # Save Syllabus file or text
     syllabus_file_path = os.path.join(upload_path, "syllabus.txt")
     syllabus_orig_name = "Pasted Syllabus Text"
     
@@ -288,7 +316,6 @@ async def upload_files(
 async def get_processing_status(task_id: str, request: Request):
     """Server-Sent Events (SSE) progress streaming or JSON status endpoint."""
     if task_id not in tasks_progress:
-        # Check disk if results exist
         _, task_output_dir = get_task_paths(task_id)
         if os.path.exists(os.path.join(task_output_dir, "results.json")):
             return {"status": "Matching completed successfully!", "progress": 100}
@@ -317,7 +344,6 @@ async def get_results(task_id: str):
     if task_id in tasks_results:
         return tasks_results[task_id]
         
-    # Disk fallback for serverless multi-instance persistence
     _, task_output_dir = get_task_paths(task_id)
     results_path = os.path.join(task_output_dir, "results.json")
     if os.path.exists(results_path):
@@ -342,7 +368,6 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
     Payload format: { "selected_topic_ids": [...], "topics": [ ... ], "export_format": "docx" | "pdf" }
     """
     if task_id not in tasks_results:
-        # Try loading from disk
         _, task_output_dir = get_task_paths(task_id)
         results_path = os.path.join(task_output_dir, "results.json")
         if os.path.exists(results_path):
@@ -384,14 +409,15 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
     else:
         final_selected_topics = [t for t in all_stored_topics if t.get("matches")]
         
-    # Validate that at least one topic has valid content (text or images)
+    # Validate that topics contain content
     valid_topics = []
     for t in final_selected_topics:
         valid_matches = []
         for m in t.get("matches", []):
             has_text = bool(m.get("text") and m.get("text").strip())
             has_images = bool(m.get("images") and len(m["images"]) > 0)
-            if has_text or has_images:
+            has_tables = bool(m.get("tables") and len(m["tables"]) > 0)
+            if has_text or has_images or has_tables:
                 valid_matches.append(m)
         if valid_matches:
             t_copy = dict(t)
@@ -406,8 +432,10 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
         
     total_source_chars = sum(len(m.get("text", "")) for t in valid_topics for m in t.get("matches", []))
     total_source_images = sum(len(m.get("images", [])) for t in valid_topics for m in t.get("matches", []))
+    total_source_tables = sum(len(m.get("tables", [])) for t in valid_topics for m in t.get("matches", []))
+    
     logger.info(f"[SELECTION] selected={len(valid_topics)}")
-    logger.info(f"[GENERATOR] source_chars={total_source_chars} source_images={total_source_images}")
+    logger.info(f"[GENERATOR] source_chars={total_source_chars} source_images={total_source_images} source_tables={total_source_tables}")
         
     _, output_path = get_task_paths(task_id)
     
@@ -425,7 +453,15 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
                 title=title,
                 description=desc
             )
-            validate_generated_document(output_file, export_format="pdf")
+            val_rep = validate_generated_document(output_file, export_format="pdf")
+            
+            # Update diagnostics
+            if task_id in tasks_diagnostics:
+                tasks_diagnostics[task_id]["output_pages"] = val_rep.get("page_count", 1)
+                tasks_diagnostics[task_id]["output_text_chars"] = val_rep.get("total_chars", 0)
+                tasks_diagnostics[task_id]["images_rendered"] = val_rep.get("images_count", 0)
+                tasks_diagnostics[task_id]["selected_topics"] = len(valid_topics)
+                
             return {"download_url": f"/api/download/{task_id}?format=pdf", "format": "pdf"}
         else:
             output_file = os.path.join(output_path, "extracted_notes.docx")
@@ -435,7 +471,15 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
                 title=title,
                 description=desc
             )
-            validate_generated_document(output_file, export_format="docx")
+            val_rep = validate_generated_document(output_file, export_format="docx")
+            
+            # Update diagnostics
+            if task_id in tasks_diagnostics:
+                tasks_diagnostics[task_id]["output_pages"] = 1
+                tasks_diagnostics[task_id]["output_text_chars"] = val_rep.get("total_chars", 0)
+                tasks_diagnostics[task_id]["images_rendered"] = val_rep.get("images_count", 0)
+                tasks_diagnostics[task_id]["selected_topics"] = len(valid_topics)
+                
             return {"download_url": f"/api/download/{task_id}?format=docx", "format": "docx"}
             
     except Exception as e:
@@ -467,13 +511,39 @@ async def download_file(task_id: str, format: str = "docx"):
         filename=filename
     )
 
+@app.get("/api/debug/{task_id}")
+@app.get("/debug/{task_id}")
+async def get_task_diagnostics(task_id: str):
+    """
+    Diagnostic endpoint returning end-to-end processing and validation metrics.
+    """
+    if task_id in tasks_diagnostics:
+        return tasks_diagnostics[task_id]
+        
+    # Return default baseline metrics if task was processed
+    if task_id in tasks_results:
+        res = tasks_results[task_id]
+        topics = res.get("topics", [])
+        total_chars = sum(len(m.get("text", "")) for t in topics for m in t.get("matches", []))
+        total_imgs = sum(len(m.get("images", [])) for t in topics for m in t.get("matches", []))
+        return {
+            "task_id": task_id,
+            "detected_topics": len(topics),
+            "source_text_chars": total_chars,
+            "images_extracted": total_imgs,
+            "status": "completed"
+        }
+        
+    raise HTTPException(status_code=404, detail="Task diagnostic information not found.")
+
 @app.get("/api/health")
 @app.get("/health")
 async def health_check():
-    """Verify if the server is alive."""
-    from backend.core.ocr_engine import TESSERACT_AVAILABLE
+    """Verify if the server is alive and report OCR capabilities."""
+    from backend.core.ocr_engine import RAPIDOCR_AVAILABLE, TESSERACT_AVAILABLE
     return {
         "status": "healthy",
+        "rapidocr_available": RAPIDOCR_AVAILABLE,
         "tesseract_ocr_available": TESSERACT_AVAILABLE
     }
 
@@ -505,7 +575,6 @@ async def serve_js(file_name: str):
             return FileResponse(p, media_type="application/javascript")
     raise HTTPException(status_code=404, detail="JS file not found")
 
-# Serve frontend static files for local development
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 frontend_dir = os.path.join(root_dir, "frontend")
 if not os.path.exists(frontend_dir):

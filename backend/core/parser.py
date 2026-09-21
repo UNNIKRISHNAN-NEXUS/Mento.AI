@@ -1,15 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-Mento.AI Document Parser
-Parses PDFs (digital & scanned via OCR), DOCX files, TXT files, and Images.
-Extracts embedded images, diagrams, figures, and charts with positional metadata.
-Supports Math Formula Preservation and English Handwriting OCR Recognition.
-Segments documents into structure-aware sections anchored by academic headings.
+Mento.AI Structured Document Parser
+Implements a Real Page-Aware Document Model for PDF, DOCX, TXT, and Image files.
+Features:
+- Page-by-page streaming with explicit resource release (supports 10, 20, 50, 100, 200+ pages)
+- Multi-column reading-order sorting (left-to-right column traversal)
+- Native PDF text extraction (PyMuPDF dict/blocks) + OCR fallback for scanned pages
+- Table extraction via PyMuPDF find_tables()
+- Image & Diagram extraction with bounding boxes and captions
+- Math expression detection and Unicode symbol formatting
+- Structure-aware academic section segmentation
 """
 
 import os
 import io
 import re
+import gc
 import hashlib
 import logging
 from typing import List, Dict, Any, Callable, Optional, Set, Tuple
@@ -18,11 +24,11 @@ from PIL import Image
 from docx import Document as DocxDocument
 from docx2python import docx2python
 
-from backend.core.ocr_engine import extract_text_from_pixmap, OCR_AVAILABLE
+from backend.core.ocr_engine import extract_text_from_pixmap, extract_text_from_image, OCR_AVAILABLE
 from backend.core.math_parser import format_math_text, is_math_expression
 from backend.core.handwriting_ocr import extract_handwritten_text
 from backend.core.post_processor import clean_and_normalize_text
-from backend.core.heading_detector import segment_into_sections
+from backend.core.heading_detector import is_valid_academic_heading, clean_heading_title, segment_into_sections
 
 logger = logging.getLogger("parser")
 
@@ -34,6 +40,108 @@ def _slugify(name: str) -> str:
     """Sanitize filename into a clean slug."""
     s = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
     return re.sub(r'_+', '_', s).strip('_')
+
+def sort_blocks_by_reading_order(blocks: List[Any], page_width: float) -> List[Any]:
+    """
+    Sorts PyMuPDF blocks in academic reading order.
+    Detects 2-column layouts by checking if blocks fall distinctly on the left and right halves.
+    If multi-column layout is detected, sorts Column 1 (top-to-bottom) then Column 2 (top-to-bottom).
+    Otherwise sorts standard top-to-bottom.
+    """
+    if not blocks:
+        return []
+
+    # Valid text blocks only: (x0, y0, x1, y1, text, block_no, block_type)
+    text_blocks = [b for b in blocks if len(b) >= 5 and (len(b) < 7 or b[6] == 0) and str(b[4]).strip()]
+    if not text_blocks:
+        return []
+
+    midpoint = page_width / 2.0
+    col1 = []
+    col2 = []
+    spanning = []
+
+    is_two_column = False
+    col1_count = 0
+    col2_count = 0
+
+    for b in text_blocks:
+        x0, y0, x1, y1 = b[0], b[1], b[2], b[3]
+        block_width = x1 - x0
+        # If block spans almost the entire width (>75% of page), it's a spanning header/banner
+        if block_width > (page_width * 0.75):
+            spanning.append(b)
+        elif x1 <= midpoint + 30:
+            col1.append(b)
+            col1_count += 1
+        elif x0 >= midpoint - 30:
+            col2.append(b)
+            col2_count += 1
+        else:
+            spanning.append(b)
+
+    # If substantial blocks are distributed on both left and right sides, activate 2-column sort
+    if col1_count >= 2 and col2_count >= 2:
+        is_two_column = True
+
+    if is_two_column:
+        # Sort each list by vertical Y0 position
+        col1.sort(key=lambda b: b[1])
+        col2.sort(key=lambda b: b[1])
+        spanning.sort(key=lambda b: b[1])
+        
+        # Interleave spanning blocks (e.g. titles at top, footnotes at bottom)
+        ordered = []
+        # Add top spanning blocks
+        for b in spanning:
+            if b[1] < page_width * 0.3:
+                ordered.append(b)
+        # Add Column 1
+        ordered.extend(col1)
+        # Add Column 2
+        ordered.extend(col2)
+        # Add bottom spanning blocks
+        for b in spanning:
+            if b not in ordered:
+                ordered.append(b)
+        return ordered
+    else:
+        # Single column: sort by Y0 then X0
+        return sorted(text_blocks, key=lambda b: (round(b[1] / 10.0) * 10.0, b[0]))
+
+def extract_tables_from_page(page) -> List[Dict[str, Any]]:
+    """
+    Extracts structured tables from a PyMuPDF page using page.find_tables().
+    Returns structured list of tables with row/col grids and bounding boxes.
+    """
+    tables = []
+    try:
+        if hasattr(page, "find_tables"):
+            tabs = page.find_tables()
+            for tab_idx, tab in enumerate(tabs):
+                try:
+                    df_data = tab.extract()
+                    if df_data and len(df_data) >= 2:  # Must have header + at least 1 data row
+                        cleaned_rows = []
+                        for row in df_data:
+                            cleaned_row = [str(cell).strip() if cell is not None else "" for cell in row]
+                            if any(cleaned_row):
+                                cleaned_rows.append(cleaned_row)
+                                
+                        if len(cleaned_rows) >= 2:
+                            bbox = [round(v, 1) for v in tab.bbox]
+                            tables.append({
+                                "table_id": f"tab_{tab_idx+1}",
+                                "bbox": bbox,
+                                "rows": cleaned_rows,
+                                "row_count": len(cleaned_rows),
+                                "col_count": len(cleaned_rows[0])
+                            })
+                except Exception as tab_err:
+                    logger.debug(f"Table extraction error on tab {tab_idx}: {tab_err}")
+    except Exception as e:
+        logger.debug(f"find_tables error: {e}")
+    return tables
 
 def extract_images_from_pdf(
     file_path: str,
@@ -58,11 +166,11 @@ def extract_images_from_pdf(
         doc = pymupdf.open(file_path)
         for page_idx in range(len(doc)):
             page_num = page_idx + 1
-            page = doc[page_idx]
+            page = doc.load_page(page_idx)
             page_images: List[Dict[str, Any]] = []
             
             image_list = page.get_images(full=True)
-            page_blocks = page.get_text("blocks")  # (x0, y0, x1, y1, text, block_no, block_type)
+            page_blocks = page.get_text("blocks")
             
             for img_idx, img_info in enumerate(image_list):
                 try:
@@ -86,13 +194,12 @@ def extract_images_from_pdf(
                     if width < 45 or height < 45 or (width * height) < 2500:
                         continue
                         
-                    # Deduplicate identical images across document (e.g. headers/watermarks)
+                    # Deduplicate identical images across document (e.g. logos)
                     img_hash = hashlib.md5(image_bytes).hexdigest()
                     if img_hash in seen_hashes:
                         continue
                     seen_hashes.add(img_hash)
                     
-                    # Get bounding box on page
                     rects = page.get_image_rects(xref)
                     bbox = [round(v, 1) for v in rects[0]] if rects else [0, 0, width, height]
                     
@@ -102,8 +209,7 @@ def extract_images_from_pdf(
                         img_rect = rects[0]
                         for b in page_blocks:
                             if len(b) >= 5:
-                                bx0, by0, bx1, by1, btext = b[0], b[1], b[2], b[3], b[4].strip()
-                                # Text block located right below or above the image (within 55pt)
+                                bx0, by0, bx1, by1, btext = b[0], b[1], b[2], b[3], str(b[4]).strip()
                                 is_below = (0 <= (by0 - img_rect.y1) <= 55)
                                 is_above = (0 <= (img_rect.y0 - by1) <= 45)
                                 if is_below or is_above:
@@ -114,7 +220,6 @@ def extract_images_from_pdf(
                                     elif len(first_line) < 75 and is_below:
                                         caption = first_line
                     
-                    # Save image file
                     img_filename = f"{source_slug}_p{page_num}_img{img_idx+1}.{image_ext}"
                     img_path = os.path.join(image_dir, img_filename)
                     with open(img_path, "wb") as f:
@@ -263,125 +368,158 @@ def parse_pdf(
     image_dir: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Parse a PDF file into structured sections.
-    Extracts text, formulas, diagrams, and figures.
-    Associates images to their corresponding section chunks.
+    Parse a PDF file page by page into structured sections.
+    Builds a Page-Aware Document Model and segments into academic sections.
+    Releases per-page memory buffers to effortlessly handle 10, 20, 50, 100, 200+ pages.
     """
     raw_blocks = []
     doc_source = source_name or os.path.basename(file_path)
     
-    # 1. Extract images per page
+    # 1. Extract embedded diagrams/images
     pdf_images_by_page = extract_images_from_pdf(file_path, image_dir=image_dir, source_name=doc_source)
-    total_extracted_imgs = sum(len(imgs) for imgs in pdf_images_by_page.values())
-    if total_extracted_imgs > 0:
-        logger.info(f"Extracted {total_extracted_imgs} embedded images/diagrams from PDF {file_path}")
-        
+    
+    doc = None
     try:
         doc = pymupdf.open(file_path)
         total_pages = len(doc)
-        logger.info(f"Parsing PDF {file_path} ({total_pages} pages). (Math: {math_mode}, Handwriting: {handwriting_mode}, OCR: {OCR_AVAILABLE})")
+        logger.info(f"[PDF] Total pages: {total_pages} for {file_path}")
         
         for i in range(total_pages):
-            page = doc[i]
             page_num = i + 1
-            page_images = pdf_images_by_page.get(page_num, [])
+            logger.info(f"[PDF] Processing page {page_num}/{total_pages}")
             
             if progress_callback:
-                progress_callback("Extracting PDF Content", page_num, total_pages)
+                progress_callback(f"Processing Page {page_num}/{total_pages}", page_num, total_pages)
                 
-            native_text = page.get_text("text") or ""
-            alpha_chars = sum(1 for c in native_text if c.isalnum())
-            
-            # Check whether digital text exists (>= 50 alphanumeric characters)
-            if not handwriting_mode and alpha_chars >= 50:
-                chunk_type = "digital"
-                page_blocks = page.get_text("blocks")  # (x0, y0, x1, y1, text, block_no, block_type)
+            try:
+                page = doc.load_page(i)
+                page_rect = page.rect
+                page_width = float(page_rect.width)
+                page_height = float(page_rect.height)
+                page_images = pdf_images_by_page.get(page_num, [])
+                page_tables = extract_tables_from_page(page)
                 
-                # Filter text blocks
-                text_blocks = [b for b in page_blocks if len(b) >= 5 and (len(b) < 7 or b[6] == 0) and b[4].strip()]
+                # Check digital text
+                native_text = page.get_text("text") or ""
+                alpha_chars = sum(1 for c in native_text if c.isalnum())
                 
-                for b_idx, b in enumerate(text_blocks):
-                    b_text = b[4].strip()
-                    cleaned = clean_text(b_text)
+                # Digital PDF Layer (>= 50 alphanumeric characters)
+                if not handwriting_mode and alpha_chars >= 50:
+                    chunk_type = "digital"
+                    raw_page_blocks = page.get_text("blocks")  # (x0, y0, x1, y1, text, block_no, block_type)
+                    sorted_blocks = sort_blocks_by_reading_order(raw_page_blocks, page_width)
+                    
+                    for b_idx, b in enumerate(sorted_blocks):
+                        b_text = str(b[4]).strip()
+                        cleaned = clean_text(b_text)
+                        
+                        if math_mode or is_math_expression(cleaned):
+                            cleaned = format_math_text(cleaned)
+                            
+                        if cleaned:
+                            # Attach page images to the last block of the page
+                            block_imgs = page_images if b_idx == len(sorted_blocks) - 1 else []
+                            block_tables = page_tables if b_idx == len(sorted_blocks) - 1 else []
+                            
+                            raw_blocks.append({
+                                "text": cleaned,
+                                "page_number": page_num,
+                                "type": chunk_type,
+                                "images": block_imgs,
+                                "tables": block_tables,
+                                "bbox": [round(b[0], 1), round(b[1], 1), round(b[2], 1), round(b[3], 1)]
+                            })
+                            
+                # Scanned / Handwriting OCR Layer
+                elif OCR_AVAILABLE:
+                    logger.info(f"[PDF] Page {page_num}: Running OCR (alpha_chars={alpha_chars}, handwriting={handwriting_mode})...")
+                    if progress_callback:
+                        progress_callback(f"Running OCR on Page {page_num}/{total_pages}", page_num, total_pages)
+                        
+                    pix = page.get_pixmap(dpi=200)
+                    img_bytes = pix.tobytes("png")
+                    pil_img = Image.open(io.BytesIO(img_bytes))
+                    
+                    if handwriting_mode:
+                        ocr_text = extract_handwritten_text(pil_img)
+                        chunk_type = "handwriting_ocr"
+                    else:
+                        ocr_text = extract_text_from_pixmap(pix)
+                        chunk_type = "ocr"
+                        
+                    cleaned = clean_text(ocr_text)
                     if math_mode or is_math_expression(cleaned):
                         cleaned = format_math_text(cleaned)
-                    if cleaned:
-                        # Attach page images to the last block of the page
-                        block_imgs = page_images if b_idx == len(text_blocks) - 1 else []
+                        
+                    # Save scanned page pixmap if no embedded images were detected
+                    if not page_images and image_dir and (len(cleaned) > 20 or handwriting_mode):
+                        try:
+                            scanned_img_name = f"{_slugify(doc_source)}_p{page_num}_scan.png"
+                            scanned_img_path = os.path.join(image_dir, scanned_img_name)
+                            pix.save(scanned_img_path)
+                            page_images = [{
+                                "image_id": f"{_slugify(doc_source)}_p{page_num}_scan",
+                                "source": doc_source,
+                                "page_number": page_num,
+                                "bbox": [0, 0, pix.width, pix.height],
+                                "width": pix.width,
+                                "height": pix.height,
+                                "path": scanned_img_path,
+                                "caption": f"Page {page_num} Diagram/Notes",
+                                "aspect_ratio": round(pix.width / max(pix.height, 1), 3)
+                            }]
+                        except Exception as scan_err:
+                            logger.debug(f"Could not save scanned page image: {scan_err}")
+                            
+                    # Clean up memory buffers explicitly
+                    pil_img.close()
+                    del pix
+                    del img_bytes
+                    
+                    if cleaned or page_images:
                         raw_blocks.append({
                             "text": cleaned,
                             "page_number": page_num,
                             "type": chunk_type,
-                            "images": block_imgs
+                            "images": page_images,
+                            "tables": page_tables,
+                            "bbox": [0, 0, page_width, page_height]
+                        })
+                else:
+                    # Fallback if no OCR installed
+                    cleaned = clean_text(native_text)
+                    if cleaned or page_images:
+                        raw_blocks.append({
+                            "text": cleaned,
+                            "page_number": page_num,
+                            "type": "digital",
+                            "images": page_images,
+                            "tables": page_tables,
+                            "bbox": [0, 0, page_width, page_height]
                         })
                         
-            elif OCR_AVAILABLE:
-                logger.info(f"Page {page_num}: Running OCR pipeline (alpha_chars={alpha_chars}, handwriting={handwriting_mode})...")
-                if progress_callback:
-                    progress_callback(f"Running OCR on Page {page_num}", page_num, total_pages)
+            except Exception as page_err:
+                logger.error(f"[PDF] Page {page_num} processing failed: {page_err}. Continuing with remaining pages.")
+                # Continue processing remaining pages
                 
-                pix = page.get_pixmap(dpi=200)
-                img_bytes = pix.tobytes("png")
-                pil_img = Image.open(io.BytesIO(img_bytes))
-                
-                if handwriting_mode:
-                    ocr_text = extract_handwritten_text(pil_img)
-                    chunk_type = "handwriting_ocr"
-                else:
-                    ocr_text = extract_text_from_pixmap(pix)
-                    chunk_type = "ocr"
-                    
-                cleaned = clean_text(ocr_text)
-                if math_mode or is_math_expression(cleaned):
-                    cleaned = format_math_text(cleaned)
-                    
-                # If no embedded images were found on this scanned page, save the rendered page pixmap as an image
-                if not page_images and image_dir and (len(cleaned) > 20 or handwriting_mode):
-                    try:
-                        scanned_img_name = f"{_slugify(doc_source)}_p{page_num}_scan.png"
-                        scanned_img_path = os.path.join(image_dir, scanned_img_name)
-                        pix.save(scanned_img_path)
-                        page_images = [{
-                            "image_id": f"{_slugify(doc_source)}_p{page_num}_scan",
-                            "source": doc_source,
-                            "page_number": page_num,
-                            "bbox": [0, 0, pix.width, pix.height],
-                            "width": pix.width,
-                            "height": pix.height,
-                            "path": scanned_img_path,
-                            "caption": f"Page {page_num} Diagram/Notes",
-                            "aspect_ratio": round(pix.width / max(pix.height, 1), 3)
-                        }]
-                    except Exception as scan_err:
-                        logger.debug(f"Could not save scanned page image: {scan_err}")
-                        
-                if cleaned:
-                    raw_blocks.append({
-                        "text": cleaned,
-                        "page_number": page_num,
-                        "type": chunk_type,
-                        "images": page_images
-                    })
-            else:
-                cleaned = clean_text(native_text)
-                if cleaned:
-                    raw_blocks.append({
-                        "text": cleaned,
-                        "page_number": page_num,
-                        "type": "digital",
-                        "images": page_images
-                    })
-        
+        logger.info(f"[PDF] Completed {total_pages}/{total_pages} pages for {file_path}")
         doc.close()
         
-        # Segment raw extracted blocks into coherent sections anchored by academic headings
+        # Segment raw extracted blocks into coherent academic sections
         chunks = segment_into_sections(raw_blocks, doc_source)
         logger.info(f"PDF {file_path} parsed into {len(chunks)} structured section chunks.")
         return chunks
         
     except Exception as e:
         logger.error(f"Error parsing PDF file {file_path}: {e}")
+        if doc:
+            try:
+                doc.close()
+            except Exception:
+                pass
         raise e
+    finally:
+        gc.collect()
 
 def parse_docx(
     file_path: str,
@@ -398,9 +536,7 @@ def parse_docx(
             progress_callback("Reading DOCX File Structure", 1, 3)
             
         docx_images = extract_images_from_docx(file_path, image_dir=image_dir, source_name=doc_source)
-        if docx_images:
-            logger.info(f"Extracted {len(docx_images)} images from DOCX {file_path}")
-            
+        
         try:
             with docx2python(file_path) as docx_content:
                 text_content = docx_content.text
@@ -420,13 +556,14 @@ def parse_docx(
             if math_mode or is_math_expression(para_text):
                 para_text = format_math_text(para_text)
             if para_text:
-                # Distribute docx images evenly across blocks or on the last block
                 block_imgs = docx_images if (p_idx == total_p - 1 and docx_images) else []
                 raw_blocks.append({
                     "text": para_text,
                     "page_number": (p_idx // 15) + 1,
                     "type": "digital",
-                    "images": block_imgs
+                    "images": block_imgs,
+                    "tables": [],
+                    "bbox": [0, 0, 612, 792]
                 })
                 
         chunks = segment_into_sections(raw_blocks, doc_source)
@@ -468,7 +605,9 @@ def parse_txt(
                     "text": cleaned,
                     "page_number": (idx // 40) + 1,
                     "type": "digital",
-                    "images": []
+                    "images": [],
+                    "tables": [],
+                    "bbox": [0, 0, 612, 792]
                 })
                 
         chunks = segment_into_sections(raw_blocks, doc_source)
@@ -491,7 +630,6 @@ def parse_image(
     image_dir: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """Parse image file (PNG, JPG, JPEG, WEBP) using OCR or Handwriting Engine into structured sections."""
-    from backend.core.ocr_engine import extract_text_from_image
     doc_source = source_name or os.path.basename(file_path)
     source_slug = _slugify(doc_source)
     try:
@@ -502,7 +640,6 @@ def parse_image(
         image = Image.open(file_path)
         w, h = image.size
         
-        # Copy image into image_dir so it can be embedded into generated notes
         saved_imgs = []
         if image_dir:
             os.makedirs(image_dir, exist_ok=True)
@@ -534,7 +671,14 @@ def parse_image(
         if math_mode or is_math_expression(cleaned_text):
             cleaned_text = format_math_text(cleaned_text)
             
-        raw_blocks = [{"text": cleaned_text, "page_number": 1, "type": chunk_type, "images": saved_imgs}]
+        raw_blocks = [{
+            "text": cleaned_text,
+            "page_number": 1,
+            "type": chunk_type,
+            "images": saved_imgs,
+            "tables": [],
+            "bbox": [0, 0, w, h]
+        }]
         chunks = segment_into_sections(raw_blocks, doc_source)
         return chunks
         

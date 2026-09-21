@@ -3,8 +3,9 @@
 Mento.AI Semantic Matcher & Topic Detection Engine
 Uses SBERT (Sentence-Transformers) + FAISS when available,
 or fast TF-IDF N-gram Cosine Similarity for lightweight serverless environments.
-Matches syllabus topics to study material chunks, and identifies 'Other Topics'
-present in the study material that were not part of the syllabus.
+Matches syllabus topics to study material chunks, identifies 'Other Topics'
+present in the study material that were not part of the syllabus, and guarantees
+zero content loss by retaining all remaining source pages and sections.
 """
 
 import re
@@ -73,7 +74,7 @@ def extract_candidate_headings_from_chunks(chunks: List[Dict[str, Any]]) -> List
                 })
                 
         # 2. Check lines inside the chunk text for any sub-headings
-        lines = chunk["text"].splitlines()
+        lines = chunk.get("text", "").splitlines()
         for line in lines:
             line_str = line.strip()
             if not is_valid_academic_heading(line_str):
@@ -101,18 +102,17 @@ def _extract_other_topics(
     matched_chunk_ids: Set[str],
     topics: List[Dict[str, Any]],
     model=None
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Set[str]]:
     """
     Identifies and structures non-syllabus topics found in the study material.
     STRICT RULE: Only verified academic headings are allowed as other topics.
-    Arbitrary sentences, paragraph starts, or single words are NEVER made into topics.
+    Returns: (other_topics, updated_covered_chunk_ids)
     """
     candidate_headings = extract_candidate_headings_from_chunks(chunks)
     other_topics = []
     other_topic_idx = 1
     covered_chunk_ids = set(matched_chunk_ids)
     
-    # Calculate similarity of candidate headings to syllabus topics
     if candidate_headings and topics:
         syllabus_titles = [t["full_context"].lower() for t in topics]
         
@@ -127,7 +127,7 @@ def _extract_other_topics(
             mat = vec.fit_transform(all_txts)
             c_mat = mat[:len(cand_titles)]
             s_mat = mat[len(cand_titles):]
-            sims = cosine_similarity(c_mat, s_mat)  # [num_cand, num_syl]
+            sims = cosine_similarity(c_mat, s_mat)
         except Exception:
             sims = np.zeros((len(cand_titles), len(syllabus_titles)))
             
@@ -137,12 +137,10 @@ def _extract_other_topics(
             # If this heading is NOT strongly similar to any syllabus topic (< 0.40), it is an Other Topic!
             if max_syl_sim < 0.40:
                 cand_chunk = cand["chunk"]
-                
-                # Check if this heading chunk is already covered or has other matching chunks
                 topic_chunks = [cand_chunk]
                 covered_chunk_ids.add(cand_chunk["chunk_id"])
                 
-                # Find other chunks with same heading title
+                # Find other chunks belonging to this same heading
                 cand_heading_lower = cand["title"].lower()
                 for c in chunks:
                     if c["chunk_id"] not in covered_chunk_ids:
@@ -154,11 +152,12 @@ def _extract_other_topics(
                 for tc in topic_chunks:
                     matches_list.append({
                         "chunk_id": tc["chunk_id"],
-                        "text": tc["text"],
-                        "page_number": tc["page_number"],
+                        "text": tc.get("text", ""),
+                        "page_number": tc.get("page_number", 1),
                         "type": tc.get("type", "digital"),
-                        "source": tc["source"],
+                        "source": tc.get("source", "Study Material"),
                         "images": tc.get("images", []),
+                        "tables": tc.get("tables", []),
                         "score": 1.0,
                         "similarity_score": 1.0,
                         "confidence_pct": 100.0
@@ -179,7 +178,69 @@ def _extract_other_topics(
                 })
                 other_topic_idx += 1
                 
-    return other_topics
+    return other_topics, covered_chunk_ids
+
+def _group_remaining_unmatched_chunks(
+    chunks: List[Dict[str, Any]],
+    covered_chunk_ids: Set[str]
+) -> List[Dict[str, Any]]:
+    """
+    CRITICAL ZERO DATA LOSS HANDLER:
+    Gathers all remaining chunks across all pages that were not claimed by syllabus topics
+    or explicit other topics. Groups them by source document and page ranges into
+    additional topics so 100% of pages and content are preserved.
+    """
+    remaining_chunks = [c for c in chunks if c["chunk_id"] not in covered_chunk_ids]
+    if not remaining_chunks:
+        return []
+
+    logger.info(f"Preserving {len(remaining_chunks)} additional source chunks to guarantee zero data loss.")
+    
+    # Group remaining chunks by (source, page_number)
+    grouped_by_page: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
+    for c in remaining_chunks:
+        key = (c.get("source", "Study Material"), c.get("page_number", 1))
+        if key not in grouped_by_page:
+            grouped_by_page[key] = []
+        grouped_by_page[key].append(c)
+
+    additional_topics = []
+    add_idx = 1
+    
+    # Sort by source, then page number
+    for (src, p_num), p_chunks in sorted(grouped_by_page.items(), key=lambda item: (item[0][0], item[0][1])):
+        matches_list = []
+        for c in p_chunks:
+            matches_list.append({
+                "chunk_id": c["chunk_id"],
+                "text": c.get("text", ""),
+                "page_number": c.get("page_number", p_num),
+                "type": c.get("type", "digital"),
+                "source": src,
+                "images": c.get("images", []),
+                "tables": c.get("tables", []),
+                "score": 0.80,
+                "similarity_score": 0.80,
+                "confidence_pct": 80.0
+            })
+            
+        topic_title = f"Additional Notes — Page {p_num} ({src})"
+        additional_topics.append({
+            "topic_id": f"add_topic_{add_idx}",
+            "title": topic_title,
+            "unit": "Additional Source Material & Notes",
+            "section": "",
+            "hierarchy_number": str(p_num),
+            "full_context": f"Additional Notes > {topic_title}",
+            "is_other_topic": True,
+            "similarity_score": 0.80,
+            "confidence_pct": 80.0,
+            "source_chunks": [c["chunk_id"] for c in p_chunks],
+            "matches": matches_list
+        })
+        add_idx += 1
+
+    return additional_topics
 
 def _match_with_tfidf(
     topics: List[Dict[str, Any]],
@@ -193,10 +254,8 @@ def _match_with_tfidf(
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
 
-    # Prepend chunk heading to the embedding text for better semantic matching.
-    # chunk["text"] (paragraph body only) is preserved for document generation.
     chunk_texts = [
-        f"{c.get('heading', '')} {c.get('text', '')}".strip() if c.get('heading') else c["text"]
+        f"{c.get('heading', '')} {c.get('text', '')}".strip() if c.get('heading') else c.get("text", "")
         for c in chunks
     ]
     topic_texts = [t["full_context"] for t in topics]
@@ -223,10 +282,7 @@ def _match_with_tfidf(
         topic_matches = []
         topic_sims = sim_matrix[i]
         
-        # Rank chunks by score
         ranked_indices = np.argsort(-topic_sims)
-        
-        # Adaptive threshold for TF-IDF
         effective_threshold = min(similarity_threshold, 0.15)
         
         for rank in range(min(top_k, len(ranked_indices))):
@@ -236,15 +292,15 @@ def _match_with_tfidf(
             if score >= effective_threshold or (rank == 0 and score > 0.04):
                 matched_chunk = chunks[idx]
                 matched_chunk_ids.add(matched_chunk["chunk_id"])
-                # Scale TF-IDF score into 0-1 range for UI display
                 display_score = min(round(score * 1.5, 4), 0.99)
                 topic_matches.append({
                     "chunk_id": matched_chunk["chunk_id"],
-                    "text": matched_chunk["text"],
-                    "page_number": matched_chunk["page_number"],
-                    "type": matched_chunk["type"],
-                    "source": matched_chunk["source"],
+                    "text": matched_chunk.get("text", ""),
+                    "page_number": matched_chunk.get("page_number", 1),
+                    "type": matched_chunk.get("type", "digital"),
+                    "source": matched_chunk.get("source", "Study Material"),
                     "images": matched_chunk.get("images", []),
+                    "tables": matched_chunk.get("tables", []),
                     "score": display_score,
                     "similarity_score": display_score,
                     "confidence_pct": round(display_score * 100, 1)
@@ -266,19 +322,19 @@ def _match_with_tfidf(
         })
 
     # Detect Other Topics from study material
-    other_topics = _extract_other_topics(chunks, matched_chunk_ids, topics)
+    other_topics, covered_chunk_ids = _extract_other_topics(chunks, matched_chunk_ids, topics)
     
-    # Combined list for backward compatibility
-    combined_topics = syllabus_results + other_topics
+    # Retain all remaining unmatched chunks to guarantee ZERO data loss
+    additional_notes_topics = _group_remaining_unmatched_chunks(chunks, covered_chunk_ids)
+    all_other_topics = other_topics + additional_notes_topics
     
-    # Chunks map
+    combined_topics = syllabus_results + all_other_topics
     chunks_map = {c["chunk_id"]: c for c in chunks}
-    
     coverage = compute_coverage_audit(syllabus_results)
     
     return {
         "syllabus_topics": syllabus_results,
-        "other_topics": other_topics,
+        "other_topics": all_other_topics,
         "topics": combined_topics,
         "chunks": chunks_map,
         "coverage": coverage
@@ -312,22 +368,19 @@ def match_syllabus_to_document(
         
     import faiss
     
-    # 1. Embed study material chunks (heading + body for better semantic matching)
+    # 1. Embed study material chunks
     logger.info(f"Embedding {len(chunks)} document chunks with SBERT...")
     chunk_texts = [
-        f"{chunk.get('heading', '')} {chunk.get('text', '')}".strip() if chunk.get('heading') else chunk["text"]
+        f"{chunk.get('heading', '')} {chunk.get('text', '')}".strip() if chunk.get('heading') else chunk.get("text", "")
         for chunk in chunks
     ]
     chunk_embeddings = model.encode(chunk_texts, show_progress_bar=False, convert_to_numpy=True)
-    
-    # Normalize for cosine similarity
     faiss.normalize_L2(chunk_embeddings)
     
     # 2. Build FAISS index
     dimension = chunk_embeddings.shape[1]
     index = faiss.IndexFlatIP(dimension)
     index.add(chunk_embeddings)
-    logger.info("FAISS vector index built successfully.")
     
     # 3. Embed syllabus topics
     logger.info(f"Embedding {len(topics)} syllabus topics...")
@@ -336,7 +389,6 @@ def match_syllabus_to_document(
     faiss.normalize_L2(topic_embeddings)
     
     # 4. Search index
-    logger.info(f"Running vector similarity search (top_k={top_k}, threshold={similarity_threshold})...")
     scores, indices = index.search(topic_embeddings, k=min(top_k, len(chunks)))
     
     # 5. Compile results
@@ -349,7 +401,6 @@ def match_syllabus_to_document(
             score = float(scores[i][rank])
             idx = int(indices[i][rank])
             
-            # FAISS can return -1 if there aren't enough elements
             if idx == -1:
                 continue
                 
@@ -359,19 +410,18 @@ def match_syllabus_to_document(
                 display_score = round(score, 4)
                 topic_matches.append({
                     "chunk_id": matched_chunk["chunk_id"],
-                    "text": matched_chunk["text"],
-                    "page_number": matched_chunk["page_number"],
-                    "type": matched_chunk["type"],
-                    "source": matched_chunk["source"],
+                    "text": matched_chunk.get("text", ""),
+                    "page_number": matched_chunk.get("page_number", 1),
+                    "type": matched_chunk.get("type", "digital"),
+                    "source": matched_chunk.get("source", "Study Material"),
                     "images": matched_chunk.get("images", []),
+                    "tables": matched_chunk.get("tables", []),
                     "score": display_score,
                     "similarity_score": display_score,
                     "confidence_pct": round(display_score * 100, 1)
                 })
         
-        # Sort matches by similarity score descending
         topic_matches.sort(key=lambda x: x["score"], reverse=True)
-        
         syllabus_results.append({
             "topic_id": topic["topic_id"],
             "title": topic["title"],
@@ -387,17 +437,21 @@ def match_syllabus_to_document(
         })
         
     # 6. Detect Other Topics from study material
-    other_topics = _extract_other_topics(chunks, matched_chunk_ids, topics, model=model)
+    other_topics, covered_chunk_ids = _extract_other_topics(chunks, matched_chunk_ids, topics, model=model)
     
-    combined_topics = syllabus_results + other_topics
+    # 7. Retain all remaining unmatched chunks to guarantee ZERO data loss
+    additional_notes_topics = _group_remaining_unmatched_chunks(chunks, covered_chunk_ids)
+    all_other_topics = other_topics + additional_notes_topics
+    
+    combined_topics = syllabus_results + all_other_topics
     chunks_map = {c["chunk_id"]: c for c in chunks}
     coverage = compute_coverage_audit(syllabus_results)
     
-    logger.info(f"Syllabus matching complete: {len(syllabus_results)} syllabus topics, {len(other_topics)} other topics detected.")
+    logger.info(f"Syllabus matching complete: {len(syllabus_results)} syllabus topics, {len(all_other_topics)} other/additional topics.")
     
     return {
         "syllabus_topics": syllabus_results,
-        "other_topics": other_topics,
+        "other_topics": all_other_topics,
         "topics": combined_topics,
         "chunks": chunks_map,
         "coverage": coverage
@@ -406,9 +460,7 @@ def match_syllabus_to_document(
 def compute_coverage_audit(matched_results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Computes coverage metrics comparing syllabus topics against study material matches.
-    Identifies covered topics vs missing topics.
     """
-    # Only calculate coverage on syllabus topics (not other_topics)
     syl_topics = [t for t in matched_results if not t.get("is_other_topic", False)]
     if not syl_topics:
         syl_topics = matched_results

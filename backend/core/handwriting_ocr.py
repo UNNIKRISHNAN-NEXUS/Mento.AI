@@ -7,28 +7,42 @@ Preprocesses images and PDF pages containing handwritten English text
 
 import logging
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from typing import Optional
+
+from backend.core.ocr_engine import get_rapidocr, RAPIDOCR_AVAILABLE, TESSERACT_AVAILABLE, pytesseract
+from backend.core.post_processor import clean_and_normalize_text
 
 logger = logging.getLogger("handwriting_ocr")
 
 def preprocess_handwritten_image(image: Image.Image) -> Image.Image:
     """
-    Applies image enhancement tuned for handwritten notes:
+    Applies non-destructive image enhancement tuned for handwritten notes:
+    - Upscale low-resolution crops
     - Grayscale conversion
-    - Mild Contrast amplification (prevents light pen strokes from fading)
+    - Contrast amplification (prevents faint pen strokes from disappearing)
+    - Autocontrast normalization (preserves background gradient / line structure)
     - Sharpness enhancement without aggressive binarization
     """
     try:
+        w, h = image.size
+        if w < 1400 or h < 1400:
+            scale = min(2.0, 1800.0 / max(w, h))
+            if scale > 1.1:
+                image = image.resize((int(w * scale), int(h * scale)), Image.Resampling.BICUBIC)
+
         gray = image.convert("L")
         
-        # Moderate Contrast amplification
+        # Contrast amplification
         enhancer = ImageEnhance.Contrast(gray)
-        enhanced = enhancer.enhance(1.8)
+        enhanced = enhancer.enhance(1.6)
+        
+        # Autocontrast to maximize dynamic range
+        normalized = ImageOps.autocontrast(enhanced, cutoff=0.5)
         
         # Sharpness Boost for character edges
-        sharp_enhancer = ImageEnhance.Sharpness(enhanced)
-        sharp = sharp_enhancer.enhance(2.0)
+        sharp_enhancer = ImageEnhance.Sharpness(normalized)
+        sharp = sharp_enhancer.enhance(1.8)
         
         return sharp
     except Exception as e:
@@ -40,34 +54,32 @@ def extract_handwritten_text(image: Image.Image) -> str:
     Extract handwritten English text from PIL Image using multi-pass RapidOCR / Tesseract
     followed by post-processing cleanup.
     """
-    from backend.core.post_processor import clean_and_normalize_text
     try:
         prep_img = preprocess_handwritten_image(image)
         extracted_text = ""
         
-        from backend.core.ocr_engine import OCR_ENGINE_INSTANCE
-        if OCR_ENGINE_INSTANCE is not None:
+        engine = get_rapidocr()
+        if engine is not None:
             # Pass 1: Preprocessed Image
             img_np = np.array(prep_img.convert("RGB"))
-            ocr_result, _ = OCR_ENGINE_INSTANCE(img_np)
+            ocr_result, _ = engine(img_np)
             if ocr_result:
-                lines = [line[1] for line in ocr_result if line and len(line) >= 2]
+                lines = [str(line[1]).strip() for line in ocr_result if line and len(line) >= 2 and str(line[1]).strip()]
                 extracted_text = "\n".join(lines)
                 
             # Pass 2: Raw Image fallback if Pass 1 yielded sparse results
             if len(extracted_text.strip()) < 30:
                 raw_np = np.array(image.convert("RGB"))
-                raw_ocr, _ = OCR_ENGINE_INSTANCE(raw_np)
+                raw_ocr, _ = engine(raw_np)
                 if raw_ocr:
-                    raw_lines = [line[1] for line in raw_ocr if line and len(line) >= 2]
+                    raw_lines = [str(line[1]).strip() for line in raw_ocr if line and len(line) >= 2 and str(line[1]).strip()]
                     raw_text = "\n".join(raw_lines)
                     if len(raw_text.strip()) > len(extracted_text.strip()):
                         extracted_text = raw_text
-                
-        # Fallback to Tesseract OCR if RapidOCR produced nothing
-        if not extracted_text.strip():
+                        
+        # Fallback to Tesseract OCR if RapidOCR produced nothing or is unavailable
+        if not extracted_text.strip() and TESSERACT_AVAILABLE and pytesseract is not None:
             try:
-                import pytesseract
                 config = r'--oem 3 --psm 6'
                 extracted_text = pytesseract.image_to_string(prep_img, config=config)
             except Exception as tess_err:
