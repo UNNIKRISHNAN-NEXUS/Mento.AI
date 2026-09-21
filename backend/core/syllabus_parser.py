@@ -39,7 +39,23 @@ def parse_syllabus(file_path: str) -> List[Dict[str, Any]]:
                 full_text = f.read()
         else:
             chunks = parse_document(file_path)
-            full_text = "\n".join([chunk["text"] for chunk in chunks])
+            # Reconstruct full_text including heading lines, because segment_into_sections
+            # strips headings from chunk["text"] (storing them in chunk["heading"]).
+            # Without this, the UNIT/topic structure is completely invisible to the parser.
+            text_lines = []
+            for chunk in chunks:
+                heading = chunk.get("heading", "").strip()
+                hn = chunk.get("hierarchy_number", "").strip()
+                body = chunk.get("text", "").strip()
+                # Restore the heading line with its hierarchy prefix for pattern matching
+                if heading and chunk.get("is_structured_section"):
+                    if hn:
+                        text_lines.append(f"{hn} {heading}")
+                    else:
+                        text_lines.append(heading)
+                if body:
+                    text_lines.append(body)
+            full_text = "\n".join(text_lines)
             
         lines = full_text.splitlines()
         

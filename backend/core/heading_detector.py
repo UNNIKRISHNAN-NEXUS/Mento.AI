@@ -11,19 +11,28 @@ from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger("heading_detector")
 
-# Stopwords & single generic words that must NEVER become standalone topic headings
-INVALID_SINGLE_WORDS = {
-    "the", "and", "where", "which", "using", "this", "following", "therefore",
-    "note", "example", "figure", "table", "because", "is", "are", "with", "from",
-    "that", "for", "about", "then", "such", "each", "between", "during", "signal",
-    "system", "method", "equation", "property", "value", "type", "types", "form",
-    "case", "point", "output", "input", "result", "characteristics", "function",
-    "definition", "introduction", "summary", "conclusion", "chapter", "unit",
-    "section", "module", "part", "page", "author", "university", "dr", "prof",
-    "also", "can", "could", "would", "should", "will", "shall", "may", "might",
-    "must", "has", "have", "had", "been", "being", "do", "does", "did", "done",
-    "etc", "viz", "ie", "eg", "i.e", "e.g", "al", "et", "below", "above", "given"
+# Domain-specific words that are NEVER valid as STANDALONE (single-word) headings
+# These CAN appear as first word in multi-word headings (e.g. "Signal Classification")
+INVALID_STANDALONE_WORDS = {
+    "note", "example", "figure", "table",
+    "definition", "introduction", "summary", "conclusion",
+    "chapter", "unit", "section", "module", "part", "page",
+    "author", "university", "dr", "prof"
 }
+
+# Grammatical stopwords/connectors that are NEVER valid as first word of ANY heading
+# (even multi-word headings must not START with these)
+INVALID_FIRST_WORDS = {
+    "the", "and", "where", "which", "using", "this", "following", "therefore",
+    "because", "is", "are", "with", "from", "that", "for", "about", "then",
+    "such", "each", "between", "during", "also", "can", "could", "would",
+    "should", "will", "shall", "may", "might", "must", "has", "have", "had",
+    "been", "being", "do", "does", "did", "done", "etc", "viz", "ie", "eg",
+    "i.e", "e.g", "al", "et", "below", "above", "given"
+}
+
+# Combined set used only for single-word rejection (backwards-compatible alias)
+INVALID_SINGLE_WORDS = INVALID_STANDALONE_WORDS | INVALID_FIRST_WORDS
 
 # Common narrative sentence starters that must never become headings
 SENTENCE_STARTERS = [
@@ -50,15 +59,15 @@ SENTENCE_STARTERS = [
     r"^thus\b",
 ]
 
-# Explicit Academic Heading Numbering Patterns
+# Explicit Academic Heading Numbering Patterns (includes em-dash U+2013/U+2014 in separators)
 NUMBERED_HEADING_PATTERN = re.compile(
-    r'^(?:(?:UNIT|MODULE|CHAPTER|PART|SECTION|SEM)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN)[:\-\.\s\s]+)?'
+    r'^(?:(?:UNIT|MODULE|CHAPTER|PART|SECTION|SEM)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN)[:\-\.\u2013\u2014\s]+)?'
     r'(\d+(?:\.\d+)*\.?|[A-Z]\.|\b[IVXLCDM]+\.?)\s+(.+)$',
     re.IGNORECASE
 )
 
 UNIT_CHAPTER_ONLY_PATTERN = re.compile(
-    r'^(?:(UNIT|MODULE|CHAPTER|PART|SECTION|SEM)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN))[:\-\.\s]*(.*)$',
+    r'^(?:(UNIT|MODULE|CHAPTER|PART|SECTION|SEM)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN))[:\-\.\u2013\u2014\s]*(.*)$',
     re.IGNORECASE
 )
 
@@ -85,13 +94,16 @@ def is_valid_academic_heading(line: str) -> bool:
     # Check for unit/chapter patterns (e.g. "UNIT 1: SIGNALS AND SYSTEMS", "CHAPTER 3: FILTERS")
     u_match = UNIT_CHAPTER_ONLY_PATTERN.match(s)
     if u_match:
-        sub_title = u_match.group(2).strip()
-        # If there's a title after the unit declaration, verify it
-        if sub_title:
-            sub_clean = re.sub(r'^[:\-\.\s]+', '', sub_title).strip()
+        # group(3) is the subtitle text AFTER the unit number (group(2) is the number itself)
+        sub_title = u_match.group(3).strip()
+        # Strip em-dash and other unicode dash prefixes from the subtitle
+        sub_clean = re.sub(r'^[\u2013\u2014\:\-\.\s]+', '', sub_title).strip()
+        # If there's a meaningful title after the unit declaration, it's valid
+        if sub_clean:
             if len(sub_clean) >= 3:
                 return True
         else:
+            # Pure "UNIT 1" with no subtitle - still a valid unit heading
             return True
             
     # Check for numbered headings (e.g. "1.1 Classification of Signals", "2. Fourier Analysis")
@@ -166,16 +178,21 @@ def is_valid_academic_heading(line: str) -> bool:
         "that", "then", "than", "such", "also", "thus", "hence", "therefore",
         "while", "after", "before", "during", "since", "until"
     }
-    if first_word in prepositions_and_conjunctions or first_word in INVALID_SINGLE_WORDS:
+    # Only reject first word if it's a grammatical stopword/connector (INVALID_FIRST_WORDS).
+    # Domain-specific words like 'signal', 'system', 'method' are allowed as first words
+    # in multi-word headings (e.g. "Signal Classification", "System Analysis").
+    if first_word in prepositions_and_conjunctions or first_word in INVALID_FIRST_WORDS:
         return False
         
-    # Must be Uppercase, Title Case, or have at least half of words capitalized
-    capitalized_count = sum(1 for w in words if w[0].isupper())
-    if capitalized_count < max(1, len(words) // 2):
+    # Must be Uppercase, Title Case, or have a majority of words capitalized.
+    # Stricter for 3+ word headings to catch sentence fragments with low capitalization.
+    capitalized_count = sum(1 for w in words if w and w[0].isupper())
+    required_cap = max(1, (len(words) + 1) // 2)  # ceiling division — e.g. 3 words needs 2 caps
+    if capitalized_count < required_cap:
         return False
     
     # Must contain at least one substantial academic noun (>= 4 letters)
-    if any(len(w) >= 4 and w.lower() not in INVALID_SINGLE_WORDS for w in words):
+    if any(len(w) >= 4 and w.lower() not in INVALID_FIRST_WORDS for w in words):
         return True
             
     return False
@@ -191,7 +208,8 @@ def clean_heading_title(line: str) -> Tuple[str, str]:
         unit_type = u_match.group(1).split()[0].title()
         unit_num = u_match.group(2).strip()
         unit_title = u_match.group(3).strip()
-        title_clean = re.sub(r'^[:\-\.\s]+', '', unit_title).strip()
+        # Strip em-dash, en-dash and standard punctuation separators from title
+        title_clean = re.sub(r'^[\u2013\u2014\:\-\.\s]+', '', unit_title).strip()
         prefix = f"{unit_type} {unit_num}"
         if title_clean:
             return title_clean, prefix

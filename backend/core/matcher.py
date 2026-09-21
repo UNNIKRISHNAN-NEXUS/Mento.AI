@@ -192,7 +192,12 @@ def _match_with_tfidf(
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
 
-    chunk_texts = [c["text"] for c in chunks]
+    # Prepend chunk heading to the embedding text for better semantic matching.
+    # chunk["text"] (paragraph body only) is preserved for document generation.
+    chunk_texts = [
+        f"{c.get('heading', '')} {c.get('text', '')}".strip() if c.get('heading') else c["text"]
+        for c in chunks
+    ]
     topic_texts = [t["full_context"] for t in topics]
 
     vectorizer = TfidfVectorizer(
@@ -305,9 +310,12 @@ def match_syllabus_to_document(
         
     import faiss
     
-    # 1. Embed study material chunks
+    # 1. Embed study material chunks (heading + body for better semantic matching)
     logger.info(f"Embedding {len(chunks)} document chunks with SBERT...")
-    chunk_texts = [chunk["text"] for chunk in chunks]
+    chunk_texts = [
+        f"{chunk.get('heading', '')} {chunk.get('text', '')}".strip() if chunk.get('heading') else chunk["text"]
+        for chunk in chunks
+    ]
     chunk_embeddings = model.encode(chunk_texts, show_progress_bar=False, convert_to_numpy=True)
     
     # Normalize for cosine similarity
