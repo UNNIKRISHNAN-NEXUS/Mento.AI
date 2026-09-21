@@ -21,7 +21,7 @@ from backend.utils.file_utils import (
 from backend.core.parser import parse_document
 from backend.core.syllabus_parser import parse_syllabus
 from backend.core.matcher import match_syllabus_to_document, compute_coverage_audit
-from backend.core.docx_generator import generate_docx, generate_pdf
+from backend.core.docx_generator import generate_docx, generate_pdf, validate_generated_document
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -81,6 +81,10 @@ def run_extraction_pipeline(
         total_native_chars = 0
         total_ocr_pages = 0
         
+        task_upload_dir, _ = get_task_paths(task_id)
+        task_image_dir = os.path.join(task_upload_dir, "images")
+        os.makedirs(task_image_dir, exist_ok=True)
+        
         for idx, item in enumerate(study_files_info):
             file_path = item["path"] if isinstance(item, dict) else item
             orig_name = item.get("filename", os.path.basename(file_path)) if isinstance(item, dict) else os.path.basename(file_path)
@@ -98,7 +102,8 @@ def run_extraction_pipeline(
                 progress_callback=parser_progress,
                 math_mode=math_mode,
                 handwriting_mode=handwriting_mode,
-                source_name=orig_name
+                source_name=orig_name,
+                image_dir=task_image_dir
             )
             all_chunks.extend(chunks)
             
@@ -114,10 +119,12 @@ def run_extraction_pipeline(
             raise ValueError("No text could be extracted from the uploaded study material(s).")
             
         headings_detected = sum(1 for c in all_chunks if c.get("is_structured_section"))
+        total_extracted_images = sum(len(c.get("images", [])) for c in all_chunks)
         logger.info(f"[EXTRACTION] files={total_files} pages={total_extracted_pages} native_text_chars={total_native_chars}")
         if total_ocr_pages > 0:
             logger.info(f"[OCR] pages_processed={total_ocr_pages}")
         logger.info(f"[HEADINGS] detected={headings_detected}")
+        logger.info(f"[IMAGE_EXTRACTION] extracted_images={total_extracted_images}")
         logger.info(f"[CHUNKS] total={len(all_chunks)}")
         
         tasks_progress[task_id] = {
@@ -377,12 +384,14 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
     else:
         final_selected_topics = [t for t in all_stored_topics if t.get("matches")]
         
-    # Validate that at least one topic has valid text content
+    # Validate that at least one topic has valid content (text or images)
     valid_topics = []
     for t in final_selected_topics:
         valid_matches = []
         for m in t.get("matches", []):
-            if m.get("text") and m.get("text").strip():
+            has_text = bool(m.get("text") and m.get("text").strip())
+            has_images = bool(m.get("images") and len(m["images"]) > 0)
+            if has_text or has_images:
                 valid_matches.append(m)
         if valid_matches:
             t_copy = dict(t)
@@ -396,8 +405,9 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
         )
         
     total_source_chars = sum(len(m.get("text", "")) for t in valid_topics for m in t.get("matches", []))
+    total_source_images = sum(len(m.get("images", [])) for t in valid_topics for m in t.get("matches", []))
     logger.info(f"[SELECTION] selected={len(valid_topics)}")
-    logger.info(f"[GENERATOR] source_chars={total_source_chars}")
+    logger.info(f"[GENERATOR] source_chars={total_source_chars} source_images={total_source_images}")
         
     _, output_path = get_task_paths(task_id)
     
@@ -415,6 +425,7 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
                 title=title,
                 description=desc
             )
+            validate_generated_document(output_file, export_format="pdf")
             return {"download_url": f"/api/download/{task_id}?format=pdf", "format": "pdf"}
         else:
             output_file = os.path.join(output_path, "extracted_notes.docx")
@@ -424,6 +435,7 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
                 title=title,
                 description=desc
             )
+            validate_generated_document(output_file, export_format="docx")
             return {"download_url": f"/api/download/{task_id}?format=docx", "format": "docx"}
             
     except Exception as e:

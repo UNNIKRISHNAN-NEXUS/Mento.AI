@@ -235,6 +235,7 @@ def segment_into_sections(
     Segments document blocks/lines into coherent logical sections.
     Each section is anchored by an academic heading and owns all following paragraphs until the next heading.
     Long sections (>1400 chars) are automatically chunked into coherent sub-blocks preserving heading context.
+    Preserves and associates images to the appropriate section chunks.
     """
     sections = []
     current_heading = None
@@ -242,20 +243,25 @@ def segment_into_sections(
     current_page = 1
     current_type = "digital"
     current_paragraphs = []
+    current_images = []
+    seen_img_ids = set()
     section_counter = 1
     
     def save_current_section():
-        nonlocal current_heading, current_hierarchy, current_paragraphs, current_page, current_type, section_counter
-        if not current_paragraphs:
+        nonlocal current_heading, current_hierarchy, current_paragraphs, current_images, seen_img_ids, current_page, current_type, section_counter
+        if not current_paragraphs and not current_images:
             return
             
         text_content = "\n\n".join(current_paragraphs).strip()
-        if len(text_content) < 15:
+        if len(text_content) < 15 and not current_images:
             current_paragraphs = []
+            current_images = []
+            seen_img_ids = set()
             return
             
         title = current_heading or "General Study Notes"
         full_ctx = f"{current_hierarchy} {title}".strip() if current_hierarchy else title
+        section_imgs = list(current_images)
         
         # If section is excessively long (>1400 chars), divide into coherent sub-chunks
         if len(text_content) > 1400:
@@ -274,6 +280,8 @@ def segment_into_sections(
                 
             for s_idx, s_text in enumerate(sub_chunks):
                 sec_id = f"{doc_source}_sec_{section_counter}_{s_idx+1}"
+                # Attach images to first sub-chunk or distribute
+                chunk_imgs = section_imgs if s_idx == 0 else []
                 sections.append({
                     "chunk_id": sec_id,
                     "section_id": sec_id,
@@ -285,6 +293,7 @@ def segment_into_sections(
                     "type": current_type,
                     "paragraphs": current_paragraphs,
                     "text": s_text,
+                    "images": chunk_imgs,
                     "is_structured_section": bool(current_heading)
                 })
             section_counter += 1
@@ -301,16 +310,28 @@ def segment_into_sections(
                 "type": current_type,
                 "paragraphs": list(current_paragraphs),
                 "text": text_content,
+                "images": section_imgs,
                 "is_structured_section": bool(current_heading)
             })
             section_counter += 1
             
         current_paragraphs = []
+        current_images = []
+        seen_img_ids = set()
         
     for block in raw_blocks:
         page_num = block.get("page_number", 1)
         b_type = block.get("type", "digital")
         text = block.get("text", "").strip()
+        block_imgs = block.get("images", [])
+        
+        # Collect any images in this block
+        for img in block_imgs:
+            img_key = img.get("image_id") or img.get("path")
+            if img_key and img_key not in seen_img_ids:
+                seen_img_ids.add(img_key)
+                current_images.append(img)
+        
         if not text:
             continue
             

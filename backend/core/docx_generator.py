@@ -3,14 +3,16 @@
 Mento.AI Notes Document & PDF Generator
 Generates clean, academic-style DOCX and PDF documents using Times New Roman (12-14pt)
 in pure black text. Includes bold unit/topic headings, source file & page references,
-and the actual extracted notes from the uploaded study material.
+the actual extracted notes from the uploaded study material, and embedded diagrams & images.
+Includes post-generation content validation to guarantee document integrity.
 """
 
 import os
 import re
 import logging
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
+from PIL import Image
 import docx
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -23,7 +25,7 @@ COLOR_BLACK = RGBColor(0, 0, 0)
 def deduplicate_and_merge_chunks(matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Deduplicates and merges overlapping text chunks from the same source document.
-    Preserves original reading order, page numbers, and formatting.
+    Preserves original reading order, page numbers, formatting, and associated images.
     """
     if not matches:
         return []
@@ -33,18 +35,20 @@ def deduplicate_and_merge_chunks(matches: List[Dict[str, Any]]) -> List[Dict[str
     
     for match in matches:
         raw_text = match.get("text", "").strip()
-        if not raw_text:
+        match_imgs = list(match.get("images", []))
+        
+        if not raw_text and not match_imgs:
             continue
             
         # Normalize for duplicate detection
-        normalized = " ".join(raw_text.split()[:25]) # first 25 words
-        if normalized in seen_texts:
+        normalized = " ".join(raw_text.split()[:25]) if raw_text else f"img_only_{match.get('chunk_id')}"
+        if normalized in seen_texts and not match_imgs:
             continue
             
         seen_texts.add(normalized)
         
         # Check if this chunk can be merged with previous chunk if overlapping
-        if cleaned_matches:
+        if cleaned_matches and raw_text:
             prev = cleaned_matches[-1]
             if prev["source"] == match.get("source") and prev["page_number"] == match.get("page_number"):
                 prev_text = prev["text"]
@@ -60,6 +64,14 @@ def deduplicate_and_merge_chunks(matches: List[Dict[str, Any]]) -> List[Dict[str
                 if overlap_len > 0:
                     merged_text = prev_text + raw_text[overlap_len:]
                     prev["text"] = merged_text
+                    
+                    # Merge images without duplicates
+                    existing_img_ids = {img.get("image_id") or img.get("path") for img in prev.get("images", [])}
+                    for img in match_imgs:
+                        img_id = img.get("image_id") or img.get("path")
+                        if img_id not in existing_img_ids:
+                            existing_img_ids.add(img_id)
+                            prev["images"].append(img)
                     continue
                     
         cleaned_matches.append({
@@ -68,7 +80,8 @@ def deduplicate_and_merge_chunks(matches: List[Dict[str, Any]]) -> List[Dict[str
             "page_number": match.get("page_number", 1),
             "source": match.get("source", "Study Material"),
             "type": match.get("type", "digital"),
-            "similarity_score": match.get("similarity_score", 1.0)
+            "similarity_score": match.get("similarity_score", 1.0),
+            "images": match_imgs
         })
         
     return cleaned_matches
@@ -97,7 +110,8 @@ def generate_docx(
 ) -> bool:
     """
     Generate a clean DOCX document in Times New Roman (12-14pt) pure black.
-    Includes unit headings, topic headings, source/page references, and actual extracted notes.
+    Includes unit headings, topic headings, source/page references, actual extracted notes,
+    and embedded diagrams, figures, and charts in reading order.
     """
     try:
         logger.info(f"Generating DOCX output at {output_path}...")
@@ -150,12 +164,13 @@ def generate_docx(
         current_unit = None
         total_topics_added = 0
         total_written_chars = 0
+        total_written_images = 0
         
         for idx, result in enumerate(matched_results):
             raw_matches = result.get("matches", [])
             matches = deduplicate_and_merge_chunks(raw_matches)
             
-            # Skip topics with no extractable text
+            # Skip topics with no extractable content
             if not matches:
                 continue
                 
@@ -177,7 +192,7 @@ def generate_docx(
                 
             add_heading_times(doc, heading_text, level=2, space_before=12, space_after=4)
                 
-            # Excerpts (12pt Times New Roman, 1.15 line spacing)
+            # Excerpts (12pt Times New Roman, 1.15 line spacing) + Images
             for m_idx, match in enumerate(matches):
                 # Source and Page Reference
                 p_meta = doc.add_paragraph()
@@ -194,30 +209,72 @@ def generate_docx(
                 meta_run.italic = True
                 
                 # Excerpt Body Text
-                text_content = match["text"]
-                total_written_chars += len(text_content)
-                paragraphs = text_content.split("\n\n")
-                
-                for text_block in paragraphs:
-                    clean_block = text_block.strip()
-                    if not clean_block:
-                        continue
-                    p_block = doc.add_paragraph()
-                    p_block.paragraph_format.space_after = Pt(6)
-                    p_block.paragraph_format.left_indent = Inches(0.15)
+                text_content = match.get("text", "")
+                if text_content:
+                    total_written_chars += len(text_content)
+                    paragraphs = text_content.split("\n\n")
                     
-                    run = p_block.add_run(clean_block)
-                    run.font.name = 'Times New Roman'
-                    run.font.size = Pt(12)
-                    run.font.color.rgb = COLOR_BLACK
+                    for text_block in paragraphs:
+                        clean_block = text_block.strip()
+                        if not clean_block:
+                            continue
+                        p_block = doc.add_paragraph()
+                        p_block.paragraph_format.space_after = Pt(6)
+                        p_block.paragraph_format.left_indent = Inches(0.15)
+                        
+                        run = p_block.add_run(clean_block)
+                        run.font.name = 'Times New Roman'
+                        run.font.size = Pt(12)
+                        run.font.color.rgb = COLOR_BLACK
+                
+                # Insert associated images
+                match_images = match.get("images", [])
+                for img in match_images:
+                    img_path = img.get("path")
+                    if not img_path or not os.path.exists(img_path):
+                        continue
+                    try:
+                        with Image.open(img_path) as pil_img:
+                            iw, ih = pil_img.size
+                            if iw <= 0 or ih <= 0:
+                                continue
+                            aspect = iw / max(ih, 1)
+                            # Fit into printable width (max 5.8 inches)
+                            if aspect >= 1.0:
+                                disp_w = min(5.8, max(2.5, iw / 96.0))
+                            else:
+                                disp_w = min(4.0, max(2.0, iw / 96.0))
+                                
+                        p_img = doc.add_paragraph()
+                        p_img.paragraph_format.space_before = Pt(8)
+                        p_img.paragraph_format.space_after = Pt(3)
+                        p_img.paragraph_format.left_indent = Inches(0.15)
+                        
+                        run_img = p_img.add_run()
+                        run_img.add_picture(img_path, width=Inches(disp_w))
+                        
+                        caption = img.get("caption", "").strip()
+                        if caption:
+                            p_cap = doc.add_paragraph()
+                            p_cap.paragraph_format.space_after = Pt(8)
+                            p_cap.paragraph_format.left_indent = Inches(0.15)
+                            run_cap = p_cap.add_run(caption)
+                            run_cap.font.name = 'Times New Roman'
+                            run_cap.font.size = Pt(10)
+                            run_cap.font.color.rgb = RGBColor(90, 90, 90)
+                            run_cap.italic = True
+                            
+                        total_written_images += 1
+                    except Exception as img_err:
+                        logger.warning(f"Could not insert image {img_path} into DOCX: {img_err}")
 
-        if total_topics_added == 0 or total_written_chars < 50:
+        if total_topics_added == 0 or (total_written_chars < 40 and total_written_images == 0):
             raise ValueError(
-                f"Generated document contains no meaningful extracted notes (total_chars={total_written_chars})."
+                f"Generated document contains no meaningful extracted notes (total_chars={total_written_chars}, total_images={total_written_images})."
             )
             
         doc.save(output_path)
-        logger.info(f"[DOCX] written_chars={total_written_chars} across {total_topics_added} topics saved to {output_path}")
+        logger.info(f"[DOCX] written_chars={total_written_chars} images={total_written_images} across {total_topics_added} topics saved to {output_path}")
         return True
         
     except Exception as e:
@@ -232,12 +289,13 @@ def generate_pdf(
 ) -> bool:
     """
     Generate a clean PDF document using ReportLab in Times-Roman (12-14pt) pure black.
-    Includes unit headings, topic headings, source/page references, and actual extracted notes.
+    Includes unit headings, topic headings, source/page references, extracted notes,
+    and embedded diagrams, figures, and charts in reading order.
     """
     try:
         from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Image as RLImage, KeepTogether
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         
         logger.info(f"Generating PDF output at {output_path}...")
@@ -321,6 +379,18 @@ def generate_pdf(
             spaceAfter=6
         )
         
+        caption_style = ParagraphStyle(
+            'CaptionStyle',
+            parent=styles['Normal'],
+            fontName='Times-Italic',
+            fontSize=9.5,
+            leading=12,
+            textColor=colors.HexColor('#444444'),
+            leftIndent=12,
+            spaceBefore=2,
+            spaceAfter=8
+        )
+        
         def xml_safe(t: str) -> str:
             if not t:
                 return ""
@@ -337,6 +407,7 @@ def generate_pdf(
         current_unit = None
         total_topics_added = 0
         total_written_chars = 0
+        total_written_images = 0
         
         for result in matched_results:
             raw_matches = result.get("matches", [])
@@ -365,24 +436,111 @@ def generate_pdf(
                 meta_text = f"Source: {match['source']} | Page: {match['page_number']}"
                 story.append(Paragraph(xml_safe(meta_text), meta_style))
                 
-                text_content = match["text"]
-                total_written_chars += len(text_content)
-                paragraphs = text_content.split("\n\n")
-                for p_text in paragraphs:
-                    clean_p = p_text.strip()
-                    if not clean_p:
+                text_content = match.get("text", "")
+                if text_content:
+                    total_written_chars += len(text_content)
+                    paragraphs = text_content.split("\n\n")
+                    for p_text in paragraphs:
+                        clean_p = p_text.strip()
+                        if not clean_p:
+                            continue
+                        story.append(Paragraph(xml_safe(clean_p), body_style))
+                
+                # Insert associated images
+                match_images = match.get("images", [])
+                for img in match_images:
+                    img_path = img.get("path")
+                    if not img_path or not os.path.exists(img_path):
                         continue
-                    story.append(Paragraph(xml_safe(clean_p), body_style))
+                    try:
+                        with Image.open(img_path) as pil_img:
+                            iw, ih = pil_img.size
+                            if iw <= 0 or ih <= 0:
+                                continue
+                            # Page printable width = 612 - 144 = 468pt
+                            max_w = 445.0
+                            max_h = 320.0
+                            scale = min(max_w / iw, max_h / ih, 1.0)
+                            final_w = iw * scale
+                            final_h = ih * scale
+                            
+                        img_flowables = [
+                            Spacer(1, 4),
+                            RLImage(img_path, width=final_w, height=final_h)
+                        ]
+                        
+                        caption = img.get("caption", "").strip()
+                        if caption:
+                            img_flowables.append(Paragraph(xml_safe(caption), caption_style))
+                        else:
+                            img_flowables.append(Spacer(1, 6))
+                            
+                        story.append(KeepTogether(img_flowables))
+                        total_written_images += 1
+                    except Exception as img_err:
+                        logger.warning(f"Could not insert image {img_path} into PDF: {img_err}")
                     
-        if total_topics_added == 0 or total_written_chars < 50:
+        if total_topics_added == 0 or (total_written_chars < 40 and total_written_images == 0):
             raise ValueError(
-                f"Generated document contains no meaningful extracted notes (total_chars={total_written_chars})."
+                f"Generated document contains no meaningful extracted notes (total_chars={total_written_chars}, total_images={total_written_images})."
             )
             
         doc.build(story)
-        logger.info(f"[PDF] written_chars={total_written_chars} across {total_topics_added} topics saved to {output_path}")
+        logger.info(f"[PDF] written_chars={total_written_chars} images={total_written_images} across {total_topics_added} topics saved to {output_path}")
         return True
         
     except Exception as e:
         logger.error(f"Error generating PDF document: {e}", exc_info=True)
         raise e
+
+def validate_generated_document(
+    output_path: str,
+    export_format: str = "docx",
+    min_chars: int = 40
+) -> Dict[str, Any]:
+    """
+    Validates the generated output document to ensure it exists, is not empty,
+    and contains extracted content (text and/or images).
+    """
+    if not os.path.exists(output_path):
+        raise FileNotFoundError(f"Generated file not found at {output_path}")
+        
+    file_size = os.path.getsize(output_path)
+    if file_size < 300:
+        raise ValueError(f"Generated file is too small ({file_size} bytes), likely corrupted.")
+        
+    report = {
+        "valid": True,
+        "format": export_format.lower(),
+        "file_size_bytes": file_size,
+        "total_chars": 0,
+        "images_count": 0
+    }
+    
+    if export_format.lower() == "pdf":
+        import pymupdf
+        doc = pymupdf.open(output_path)
+        report["page_count"] = len(doc)
+        total_text = ""
+        total_imgs = 0
+        for page in doc:
+            total_text += page.get_text("text") or ""
+            total_imgs += len(page.get_images())
+        doc.close()
+        
+        report["total_chars"] = len(total_text.strip())
+        report["images_count"] = total_imgs
+        if report["total_chars"] < min_chars and total_imgs == 0:
+            raise ValueError(f"Generated PDF contains insufficient content ({report['total_chars']} chars, {total_imgs} images).")
+    else:
+        import docx
+        doc = docx.Document(output_path)
+        total_text = " ".join(p.text for p in doc.paragraphs if p.text.strip())
+        report["total_chars"] = len(total_text)
+        report["paragraphs_count"] = len(doc.paragraphs)
+        report["images_count"] = len(doc.inline_shapes)
+        if report["total_chars"] < min_chars and report["images_count"] == 0:
+            raise ValueError(f"Generated DOCX contains insufficient content ({report['total_chars']} chars, {report['images_count']} images).")
+            
+    logger.info(f"[VALIDATION] format={export_format} chars={report['total_chars']} images={report['images_count']} size={file_size} bytes - OK")
+    return report

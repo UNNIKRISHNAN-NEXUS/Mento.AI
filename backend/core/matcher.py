@@ -158,6 +158,7 @@ def _extract_other_topics(
                         "page_number": tc["page_number"],
                         "type": tc.get("type", "digital"),
                         "source": tc["source"],
+                        "images": tc.get("images", []),
                         "score": 1.0,
                         "similarity_score": 1.0,
                         "confidence_pct": 100.0
@@ -243,6 +244,7 @@ def _match_with_tfidf(
                     "page_number": matched_chunk["page_number"],
                     "type": matched_chunk["type"],
                     "source": matched_chunk["source"],
+                    "images": matched_chunk.get("images", []),
                     "score": display_score,
                     "similarity_score": display_score,
                     "confidence_pct": round(display_score * 100, 1)
@@ -361,6 +363,7 @@ def match_syllabus_to_document(
                     "page_number": matched_chunk["page_number"],
                     "type": matched_chunk["type"],
                     "source": matched_chunk["source"],
+                    "images": matched_chunk.get("images", []),
                     "score": display_score,
                     "similarity_score": display_score,
                     "confidence_pct": round(display_score * 100, 1)
