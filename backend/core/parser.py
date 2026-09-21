@@ -18,16 +18,13 @@ from docx2python import docx2python
 from backend.core.ocr_engine import extract_text_from_pixmap, TESSERACT_AVAILABLE
 from backend.core.math_parser import format_math_text, is_math_expression
 from backend.core.handwriting_ocr import extract_handwritten_text
+from backend.core.post_processor import clean_and_normalize_text
 
 logger = logging.getLogger("parser")
 
 def clean_text(text: str) -> str:
-    """Clean extra spaces and redundant newlines from text."""
-    if not text:
-        return ""
-    lines = [line.strip() for line in text.splitlines()]
-    lines = [line for line in lines if line]
-    return "\n".join(lines)
+    """Clean, fix spelling, unwrap line breaks, and normalize extracted text."""
+    return clean_and_normalize_text(text)
 
 def parse_pdf(
     file_path: str, 

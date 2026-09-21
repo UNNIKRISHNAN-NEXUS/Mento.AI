@@ -68,6 +68,7 @@ def match_syllabus_to_document(
     
     # 5. Compile results
     matched_results = []
+    matched_chunk_ids = set()
     
     for i, topic in enumerate(topics):
         topic_matches = []
@@ -81,6 +82,7 @@ def match_syllabus_to_document(
                 
             if score >= similarity_threshold:
                 matched_chunk = chunks[idx]
+                matched_chunk_ids.add(matched_chunk["chunk_id"])
                 topic_matches.append({
                     "chunk_id": matched_chunk["chunk_id"],
                     "text": matched_chunk["text"],
@@ -103,6 +105,33 @@ def match_syllabus_to_document(
             "hierarchy_number": topic["hierarchy_number"],
             "full_context": topic["full_context"],
             "matches": topic_matches
+        })
+        
+    # 6. Preserve unmatched chunks (e.g. handwritten OCR or notes that didn't meet topic threshold)
+    unmatched_chunks = [c for c in chunks if c["chunk_id"] not in matched_chunk_ids]
+    if unmatched_chunks:
+        logger.info(f"Preserving {len(unmatched_chunks)} unmatched study/handwritten note chunks...")
+        uncategorized_matches = []
+        for chunk in unmatched_chunks:
+            uncategorized_matches.append({
+                "chunk_id": chunk["chunk_id"],
+                "text": chunk["text"],
+                "page_number": chunk["page_number"],
+                "type": chunk["type"],
+                "source": chunk["source"],
+                "score": 0.5,
+                "similarity_score": 0.5,
+                "confidence_pct": 50.0
+            })
+            
+        matched_results.append({
+            "topic_id": "topic_uncategorized_notes",
+            "title": "Extracted Study Notes (Uncategorized / Additional Notes)",
+            "unit": "Extracted Notes & Handwritten Materials",
+            "section": "General",
+            "hierarchy_number": "*",
+            "full_context": "Additional extracted study materials and handwritten notes",
+            "matches": uncategorized_matches
         })
         
     logger.info("Syllabus-to-document matching completed.")

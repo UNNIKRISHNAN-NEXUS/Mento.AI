@@ -95,6 +95,12 @@ def generate_docx(
         current_unit = None
         
         for idx, result in enumerate(matched_results):
+            matches = result.get("matches", [])
+            
+            # Skip topics with no matches to avoid empty syllabus headers
+            if not matches:
+                continue
+                
             unit_name = result.get("unit", "General")
             
             # Unit Heading (14pt Bold Times New Roman)
@@ -108,11 +114,6 @@ def generate_docx(
             heading_text = f"{topic_number} {topic_title}".strip() if topic_number else topic_title
             
             add_heading_times(doc, heading_text, level=2, space_before=12, space_after=4)
-            
-            matches = result.get("matches", [])
-            
-            if not matches:
-                continue
                 
             # Excerpts (12pt Times New Roman, 1.15 line spacing)
             for m_idx, match in enumerate(matches):
@@ -258,6 +259,12 @@ def generate_pdf(
         current_unit = None
         
         for result in matched_results:
+            matches = result.get("matches", [])
+            
+            # Skip topics with no matches to avoid empty syllabus headers
+            if not matches:
+                continue
+                
             unit_name = result.get("unit", "General")
             
             if unit_name != current_unit:
@@ -269,11 +276,6 @@ def generate_pdf(
             heading_text = f"{topic_number} {topic_title}".strip() if topic_number else topic_title
             
             story.append(Paragraph(heading_text, topic_style))
-            
-            matches = result.get("matches", [])
-            
-            if not matches:
-                continue
                 
             for match in matches:
                 meta_text = f"[Source: {match['source']} | Page {match['page_number']}]"

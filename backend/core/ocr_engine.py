@@ -1,123 +1,384 @@
 # -*- coding: utf-8 -*-
+
 """
 Mento.AI OCR Engine
-Handles text extraction from scanned documents and images using RapidOCR (ONNX) with pytesseract fallback.
+
+Primary OCR:
+    RapidOCR (ONNX)
+
+Optional fallback:
+    Tesseract via pytesseract
+
+Designed for:
+    - Windows local development
+    - Linux cloud deployment such as Render
 """
 
-import os
-import sys
+import io
 import logging
+import os
+
 import numpy as np
 from PIL import Image, ImageEnhance, ImageOps
 
-# Set up logging
+
+# =========================================================
+# LOGGING
+# =========================================================
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ocr_engine")
+
+
+# =========================================================
+# RAPIDOCR
+# =========================================================
 
 _RAPIDOCR_INSTANCE = None
 RAPIDOCR_AVAILABLE = False
 
 try:
     from rapidocr_onnxruntime import RapidOCR
+
     RAPIDOCR_AVAILABLE = True
-    logger.info("RapidOCR (ONNX) engine is available.")
+    logger.info("RapidOCR package is available.")
+
 except ImportError:
     logger.warning("RapidOCR is not installed.")
 
-# Fallback pytesseract support
-import pytesseract
 
-TESSERACT_COMMON_PATHS = [
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-    os.path.expanduser(r"~\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"),
-]
+# =========================================================
+# TESSERACT
+# =========================================================
 
-def configure_tesseract() -> bool:
-    """Try to configure Tesseract path on Windows if available."""
-    try:
-        pytesseract.get_tesseract_version()
-        return True
-    except pytesseract.TesseractNotFoundError:
-        for path in TESSERACT_COMMON_PATHS:
-            if os.path.exists(path):
-                pytesseract.pytesseract.tesseract_cmd = path
-                try:
-                    pytesseract.get_tesseract_version()
-                    return True
-                except Exception:
-                    pass
+TESSERACT_AVAILABLE = False
+pytesseract = None
+
+try:
+    import pytesseract
+
+    def configure_tesseract():
+        """
+        Detect whether Tesseract is installed.
+        """
+
+        # Try Tesseract available in system PATH
+        try:
+            pytesseract.get_tesseract_version()
+
+            logger.info("Tesseract executable detected.")
+
+            return True
+
+        except Exception:
+            pass
+
+        # Windows installation paths
+        if os.name == "nt":
+
+            windows_paths = [
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+                os.path.expanduser(
+                    r"~\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+                ),
+            ]
+
+            for path in windows_paths:
+
+                if os.path.exists(path):
+
+                    try:
+                        pytesseract.pytesseract.tesseract_cmd = path
+
+                        pytesseract.get_tesseract_version()
+
+                        logger.info(
+                            "Tesseract found at: %s",
+                            path
+                        )
+
+                        return True
+
+                    except Exception:
+                        continue
+
+        logger.warning(
+            "Tesseract executable not found. "
+            "RapidOCR will be used."
+        )
+
         return False
 
-TESSERACT_AVAILABLE = configure_tesseract()
-OCR_AVAILABLE = RAPIDOCR_AVAILABLE or TESSERACT_AVAILABLE
+
+    TESSERACT_AVAILABLE = configure_tesseract()
+
+except ImportError:
+
+    logger.warning(
+        "pytesseract is not installed. "
+        "Tesseract fallback disabled."
+    )
+
+
+# =========================================================
+# OCR AVAILABILITY
+# =========================================================
+
+OCR_AVAILABLE = (
+    RAPIDOCR_AVAILABLE or
+    TESSERACT_AVAILABLE
+)
+
+
+# =========================================================
+# RAPIDOCR LAZY INITIALIZATION
+# =========================================================
 
 def get_rapidocr():
-    """Lazy initialization of RapidOCR model."""
+    """
+    Initialize RapidOCR only when required.
+    """
+
     global _RAPIDOCR_INSTANCE
-    if _RAPIDOCR_INSTANCE is None and RAPIDOCR_AVAILABLE:
+
+    if (
+        _RAPIDOCR_INSTANCE is None
+        and RAPIDOCR_AVAILABLE
+    ):
+
         try:
-            logger.info("Initializing RapidOCR engine...")
+
+            logger.info(
+                "Initializing RapidOCR engine..."
+            )
+
             _RAPIDOCR_INSTANCE = RapidOCR()
-            logger.info("RapidOCR engine initialized successfully.")
-        except Exception as e:
-            logger.error(f"Failed to initialize RapidOCR: {e}")
+
+            logger.info(
+                "RapidOCR initialized successfully."
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "Failed to initialize RapidOCR: %s",
+                exc
+            )
+
+            _RAPIDOCR_INSTANCE = None
+
     return _RAPIDOCR_INSTANCE
 
-# Public alias — imported by handwriting_ocr.py
-OCR_ENGINE_INSTANCE = get_rapidocr()
+
+# =========================================================
+# COMPATIBILITY ALIAS
+# =========================================================
+
+OCR_ENGINE_INSTANCE = None
+
+
+# =========================================================
+# IMAGE PREPROCESSING
+# =========================================================
 
 def preprocess_image(image: Image.Image) -> Image.Image:
-    """Enhance the image for better OCR accuracy."""
+    """
+    Improve image quality before OCR.
+    """
+
     try:
+
         gray = image.convert("L")
+
         enhancer = ImageEnhance.Contrast(gray)
+
         enhanced = enhancer.enhance(2.0)
-        normalized = ImageOps.autocontrast(enhanced)
+
+        normalized = ImageOps.autocontrast(
+            enhanced
+        )
+
         return normalized
-    except Exception as e:
-        logger.error(f"Error in image preprocessing: {e}")
+
+    except Exception as exc:
+
+        logger.error(
+            "Image preprocessing error: %s",
+            exc
+        )
+
         return image
 
-def extract_text_from_image(image: Image.Image) -> str:
-    """Extract text from a Pillow Image using RapidOCR or pytesseract fallback."""
-    if not OCR_AVAILABLE:
-        logger.warning("No OCR engine available.")
+
+# =========================================================
+# RAPIDOCR EXTRACTION
+# =========================================================
+
+def _extract_with_rapidocr(
+    image: Image.Image
+) -> str:
+
+    engine = get_rapidocr()
+
+    if engine is None:
         return ""
 
-    # Try RapidOCR first
-    if RAPIDOCR_AVAILABLE:
-        try:
-            engine = get_rapidocr()
-            if engine:
-                img_array = np.array(image.convert("RGB"))
-                result, _ = engine(img_array)
-                if result:
-                    lines = [line[1] for line in result if line and len(line) > 1]
-                    extracted_text = "\n".join(lines).strip()
-                    if extracted_text:
-                        return extracted_text
-        except Exception as e:
-            logger.error(f"RapidOCR extraction error: {e}")
+    try:
 
-    # Fallback to Tesseract
+        img_array = np.array(
+            image.convert("RGB")
+        )
+
+        result, _ = engine(img_array)
+
+        if not result:
+            return ""
+
+        lines = []
+
+        for line in result:
+
+            if line and len(line) > 1:
+
+                text = line[1]
+
+                if text:
+                    lines.append(str(text))
+
+        return "\n".join(lines).strip()
+
+    except Exception as exc:
+
+        logger.exception(
+            "RapidOCR extraction error: %s",
+            exc
+        )
+
+        return ""
+
+
+# =========================================================
+# TESSERACT EXTRACTION
+# =========================================================
+
+def _extract_with_tesseract(
+    image: Image.Image
+) -> str:
+
+    if (
+        not TESSERACT_AVAILABLE
+        or pytesseract is None
+    ):
+        return ""
+
+    try:
+
+        processed_image = preprocess_image(
+            image
+        )
+
+        text = pytesseract.image_to_string(
+            processed_image
+        )
+
+        return text.strip()
+
+    except Exception as exc:
+
+        logger.exception(
+            "Tesseract extraction error: %s",
+            exc
+        )
+
+        return ""
+
+
+# =========================================================
+# PUBLIC IMAGE OCR
+# =========================================================
+
+def extract_text_from_image(
+    image: Image.Image
+) -> str:
+    """
+    Extract text from an image.
+
+    Priority:
+
+    1. RapidOCR
+    2. Tesseract
+    3. Empty string
+    """
+
+    if not OCR_AVAILABLE:
+
+        logger.warning(
+            "No OCR engine is available."
+        )
+
+        return ""
+
+    # -----------------------------------------------------
+    # RapidOCR
+    # -----------------------------------------------------
+
+    if RAPIDOCR_AVAILABLE:
+
+        text = _extract_with_rapidocr(
+            image
+        )
+
+        if text:
+            return text
+
+    # -----------------------------------------------------
+    # Tesseract fallback
+    # -----------------------------------------------------
+
     if TESSERACT_AVAILABLE:
-        try:
-            processed_img = preprocess_image(image)
-            text = pytesseract.image_to_string(processed_img)
-            return text.strip()
-        except Exception as e:
-            logger.error(f"Tesseract OCR extraction error: {e}")
+
+        text = _extract_with_tesseract(
+            image
+        )
+
+        if text:
+            return text
 
     return ""
 
-def extract_text_from_pixmap(pixmap) -> str:
-    """Convert a PyMuPDF Pixmap to a Pillow Image and perform OCR."""
-    import io
+
+# =========================================================
+# PYMUPDF PIXMAP OCR
+# =========================================================
+
+def extract_text_from_pixmap(
+    pixmap
+) -> str:
+    """
+    Convert PyMuPDF Pixmap to Pillow Image
+    and run OCR.
+    """
+
     try:
-        png_bytes = pixmap.tobytes("png")
-        image = Image.open(io.BytesIO(png_bytes))
-        return extract_text_from_image(image)
-    except Exception as e:
-        logger.error(f"Error processing page pixmap: {e}")
+
+        png_bytes = pixmap.tobytes(
+            "png"
+        )
+
+        image = Image.open(
+            io.BytesIO(png_bytes)
+        )
+
+        return extract_text_from_image(
+            image
+        )
+
+    except Exception as exc:
+
+        logger.exception(
+            "Pixmap OCR error: %s",
+            exc
+        )
+
         return ""

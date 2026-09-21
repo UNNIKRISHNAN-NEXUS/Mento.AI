@@ -4,6 +4,11 @@ backend/.venv/
 venv/
 ENV/
 
+# Environment Variables / Secrets
+.env
+.env.*
+!.env.example
+
 # Python Bytecode & Cache
 __pycache__/
 *.py[cod]
@@ -13,13 +18,20 @@ __pycache__/
 # Temporary User Uploads & Generated Files
 backend/uploads/*
 !backend/uploads/.gitkeep
+
 backend/outputs/*
 !backend/outputs/.gitkeep
+
 backend/scratch/*
+
 uploads/*
 outputs/*
+
+# Generated Documents
 *.docx
 *.pdf
+
+# Test Files
 test_out.docx
 test_out.pdf
 test_study.txt
@@ -34,5 +46,5 @@ Thumbs.db
 # Vercel Build Output
 .vercel/
 
-# Note: .agents/ is intentionally NOT ignored — it contains Antigravity IDE
-# workspace rules and skills that should be shared with all contributors.
+# Antigravity
+# .agents/ is intentionally NOT ignored
