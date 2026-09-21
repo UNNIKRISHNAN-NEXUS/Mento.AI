@@ -384,10 +384,40 @@ async def health_check():
         "tesseract_ocr_available": TESSERACT_AVAILABLE
     }
 
-# Serve frontend static files (checks frontend/ and public/)
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_index():
+    """Serves the single-page application frontend index.html."""
+    for d in ["frontend", "public", "."]:
+        index_p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), d, "index.html")
+        if os.path.exists(index_p):
+            with open(index_p, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<!DOCTYPE html><html><body><h1>Mento.AI Backend is Running</h1></body></html>")
+
+@app.get("/css/{file_name}")
+async def serve_css(file_name: str):
+    """Serves CSS styling assets."""
+    for d in ["frontend/css", "public/css", "css"]:
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), d, file_name)
+        if os.path.exists(p):
+            return FileResponse(p, media_type="text/css")
+    raise HTTPException(status_code=404, detail="CSS file not found")
+
+@app.get("/js/{file_name}")
+async def serve_js(file_name: str):
+    """Serves JavaScript application assets."""
+    for d in ["frontend/js", "public/js", "js"]:
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), d, file_name)
+        if os.path.exists(p):
+            return FileResponse(p, media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="JS file not found")
+
+# Serve frontend static files for local development
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 frontend_dir = os.path.join(root_dir, "frontend")
 if not os.path.exists(frontend_dir):
     frontend_dir = os.path.join(root_dir, "public")
 if os.path.exists(frontend_dir):
-    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
