@@ -328,15 +328,17 @@ startProcessBtn.addEventListener("click", async () => {
 
 function startProgressMonitoring(task_id) {
     const apiBase = getApiBaseUrl();
-    const eventSource = new EventSource(`${apiBase}/api/process/${task_id}`);
+    let isCompleted = false;
+    let pollInterval = null;
+    let eventSource = null;
 
-    eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        const progress = data.progress;
-        const status = data.status;
-
+    function handleProgressUpdate(progress, status) {
+        if (isCompleted) return;
+        
         if (progress === -1) {
-            eventSource.close();
+            isCompleted = true;
+            if (eventSource) eventSource.close();
+            if (pollInterval) clearInterval(pollInterval);
             alert(`Process failed: ${status}`);
             showStage(uploadStage);
             return;
@@ -347,15 +349,53 @@ function startProgressMonitoring(task_id) {
         progressStatusTitle.textContent = status;
 
         if (progress >= 100) {
-            eventSource.close();
+            isCompleted = true;
+            if (eventSource) eventSource.close();
+            if (pollInterval) clearInterval(pollInterval);
             fetchResults(task_id);
         }
-    };
+    }
 
-    eventSource.onerror = (err) => {
-        console.error("SSE connection error", err);
-        eventSource.close();
-    };
+    // 1. Primary SSE Streaming
+    try {
+        eventSource = new EventSource(`${apiBase}/api/process/${task_id}`);
+
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            handleProgressUpdate(data.progress, data.status);
+        };
+
+        eventSource.onerror = (err) => {
+            console.warn("SSE stream interrupted. Switching to HTTP polling fallback...", err);
+            if (eventSource) eventSource.close();
+            startPollingFallback();
+        };
+    } catch (e) {
+        console.warn("SSE EventSource init failed. Using HTTP polling fallback.", e);
+        startPollingFallback();
+    }
+
+    // 2. Fail-Safe REST Polling Fallback
+    function startPollingFallback() {
+        if (pollInterval || isCompleted) return;
+        pollInterval = setInterval(async () => {
+            if (isCompleted) {
+                clearInterval(pollInterval);
+                return;
+            }
+            try {
+                const res = await fetch(`${apiBase}/api/process/${task_id}`, {
+                    headers: { "Accept": "application/json" }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    handleProgressUpdate(data.progress, data.status);
+                }
+            } catch (pollErr) {
+                console.error("Polling error:", pollErr);
+            }
+        }, 1200);
+    }
 }
 
 // --- Fetch & Render Preview ---

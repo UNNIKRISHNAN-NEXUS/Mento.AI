@@ -216,10 +216,14 @@ async def upload_files(
 
 @app.get("/api/process/{task_id}")
 @app.get("/process/{task_id}")
-async def get_processing_status(task_id: str):
-    """Server-Sent Events (SSE) progress streaming endpoint."""
+async def get_processing_status(task_id: str, request: Request):
+    """Server-Sent Events (SSE) progress streaming or JSON status endpoint."""
     if task_id not in tasks_progress:
         raise HTTPException(status_code=404, detail="Task not found.")
+        
+    accept_header = request.headers.get("accept", "")
+    if "text/event-stream" not in accept_header:
+        return tasks_progress.get(task_id, {"status": "Initializing...", "progress": 0})
         
     async def status_generator():
         while True:
