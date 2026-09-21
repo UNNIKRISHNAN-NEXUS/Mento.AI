@@ -1,0 +1,45 @@
+
+UNIT 1 — SIGNALS AND SYSTEMS
+
+1.1 Classification of Signals
+A signal is a function that conveys information about the state or behavior of a physical system.
+Signals can be categorized in multiple ways:
+- Continuous-time signals: Defined for every instant of time t over a continuum.
+- Discrete-time signals: Defined only at discrete time instants n (integers).
+- Deterministic vs Random: Deterministic signals can be uniquely modeled by mathematical equations, whereas random signals exhibit uncertainty.
+- Periodic vs Aperiodic: A signal x(t) is periodic if x(t + T) = x(t) for all t.
+- Energy vs Power: Energy signals have finite total energy, while power signals have finite average power.
+
+1.2 Continuous Time Signals
+Continuous-time signals are represented as continuous functions of time x(t).
+Examples include analog speech waveforms, voltages across resistors in an RC circuit, and temperature variations over time.
+The continuous unit impulse function delta(t) and unit step function u(t) are fundamental building blocks.
+
+1.3 Discrete Time Signals
+Discrete-time signals are represented mathematically as sequences of real or complex numbers x[n], where n is an integer index.
+They are commonly obtained through uniform sampling of analog signals: x[n] = x(nTs), where Ts is the sampling period.
+Important discrete signals include:
+1. Discrete unit impulse delta[n] = 1 for n=0, 0 otherwise.
+2. Discrete unit step u[n] = 1 for n>=0, 0 otherwise.
+3. Exponential sequences x[n] = a^n.
+
+CHAPTER 5: ADVANCED TRANSFORM TECHNIQUES (NON-SYLLABUS EXTENSION)
+
+5.1 Z-Transform
+The Z-transform is a mathematical tool used extensively in digital signal processing and discrete-time control theory.
+It transforms a discrete-time domain signal x[n] into a complex frequency domain representation X(z).
+Definition:
+X(z) = sum_{n=-infinity}^{infinity} x[n] * z^{-n}
+where z = r * e^{j * omega} is a complex variable.
+The Region of Convergence (ROC) defines the set of all z in the complex plane for which the summation converges.
+Key Properties:
+- Linearity: Z{a*x1[n] + b*x2[n]} = a*X1(z) + b*X2(z)
+- Time Shifting: Z{x[n - k]} = z^{-k} * X(z)
+- Convolution: Z{x1[n] * x2[n]} = X1(z) * X2(z)
+
+5.2 Noise Reduction Techniques
+Noise reduction aims to recover an estimate of the original clean signal s[n] from a noisy observation y[n] = s[n] + v[n].
+Common methods include:
+- Moving Average Filtering: Smoothes out high-frequency fluctuations.
+- Median Filtering: Effective against impulsive or salt-and-pepper noise while preserving sharp step edges.
+- Spectral Subtraction: Estimates noise power spectral density during silence periods and subtracts it from the noisy spectrum.

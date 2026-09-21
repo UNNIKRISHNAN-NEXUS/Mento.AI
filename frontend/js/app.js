@@ -62,6 +62,10 @@ const resultsAccordion = document.getElementById("results-accordion");
 const previewStudyFile = document.getElementById("preview-study-file");
 const previewSyllabusFile = document.getElementById("preview-syllabus-file");
 const previewTotalMatches = document.getElementById("preview-total-matches");
+const btnSelectAll = document.getElementById("btn-select-all");
+const btnClearAll = document.getElementById("btn-clear-all");
+const selectionCounter = document.getElementById("selection-counter");
+const btnTopicCount = document.getElementById("btn-topic-count");
 
 const choiceDocx = document.getElementById("choice-docx");
 const choicePdf = document.getElementById("choice-pdf");
@@ -614,6 +618,65 @@ function clientParseSyllabus(rawText) {
     return topics;
 }
 
+// Helper: Extract candidate headings from chunks in browser
+function clientExtractCandidateHeadings(chunks) {
+    const candidates = [];
+    const seen = new Set();
+    const headingPatterns = [
+        /^(?:UNIT|MODULE|CHAPTER|PART|SECTION)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE)[:\-\.\s\s]+(.*)$/i,
+        /^(\d+(?:\.\d+)+)\.?\s+([A-Z].*)$/,
+        /^([A-Z][a-zA-Z0-9\s\-\(\)\/\,\&]{3,65}):\s*$/
+    ];
+
+    chunks.forEach(chunk => {
+        const lines = chunk.text.split(/\r?\n/);
+        lines.forEach(line => {
+            const str = line.trim();
+            if (str.length < 3 || str.length > 80) return;
+            let titleFound = null;
+            let hierarchyNum = "";
+
+            for (const pat of headingPatterns) {
+                const m = str.match(pat);
+                if (m) {
+                    if (m.length === 3) {
+                        hierarchyNum = m[1].trim();
+                        titleFound = m[2].trim();
+                    } else if (m.length === 2) {
+                        titleFound = m[1].trim();
+                    }
+                    break;
+                }
+            }
+
+            if (!titleFound) {
+                if (str === str.toUpperCase() && str.length >= 4 && str.length <= 60 && !str.endsWith(".")) {
+                    titleFound = str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                } else if (/^[A-Z][a-zA-Z0-9\s\-]{3,50}$/.test(str) && !str.endsWith(".")) {
+                    const words = str.split(/\s+/);
+                    if (words.length >= 1 && words.length <= 7 && !["the", "this", "and", "or", "in", "with", "from"].includes(words[0].toLowerCase())) {
+                        titleFound = str;
+                    }
+                }
+            }
+
+            if (titleFound && titleFound.length >= 3) {
+                const norm = titleFound.toLowerCase().trim();
+                if (!seen.has(norm) && !["page", "figure", "table", "university", "author", "isbn"].some(k => norm.includes(k))) {
+                    seen.add(norm);
+                    candidates.push({
+                        title: titleFound,
+                        hierarchy_number: hierarchyNum,
+                        chunk: chunk
+                    });
+                }
+            }
+        });
+    });
+
+    return candidates;
+}
+
 // Lightweight Browser TF-IDF Vector Semantic Matcher
 function clientTfidfMatching(topics, chunks, threshold = 0.35, topK = 5) {
     const STOP_WORDS = new Set([
@@ -689,7 +752,7 @@ function clientTfidfMatching(topics, chunks, threshold = 0.35, topK = 5) {
         return dot;
     }
 
-    const matchedResults = [];
+    const syllabusResults = [];
     const matchedChunkIds = new Set();
     const effectiveThreshold = Math.min(threshold, 0.12);
 
@@ -737,51 +800,105 @@ function clientTfidfMatching(topics, chunks, threshold = 0.35, topK = 5) {
             }
         }
 
-        matchedResults.push({
+        syllabusResults.push({
             topic_id: topic.topic_id,
             title: topic.title,
             unit: topic.unit,
             section: topic.section,
             hierarchy_number: topic.hierarchy_number,
             full_context: topic.full_context,
+            is_other_topic: false,
+            similarity_score: topicMatches.length > 0 ? topicMatches[0].similarity_score : 0.0,
+            confidence_pct: topicMatches.length > 0 ? topicMatches[0].confidence_pct : 0.0,
             matches: topicMatches
         });
     });
 
-    // Uncategorized study notes fallback
-    const unmatchedChunks = chunks.filter(c => !matchedChunkIds.has(c.chunk_id));
-    if (unmatchedChunks.length > 0) {
-        matchedResults.push({
-            topic_id: "topic_uncategorized_notes",
-            title: "Extracted Study Notes (Additional Notes & Visual Excerpts)",
-            unit: "Additional Study Materials",
-            section: "General",
+    // Detect Other Topics from study notes
+    const candidateHeadings = clientExtractCandidateHeadings(chunks);
+    const otherTopics = [];
+    let otherTopicIdx = 1;
+
+    candidateHeadings.forEach(cand => {
+        const candTokens = tokenize(cand.title);
+        const candVec = vectorize(candTokens);
+        let maxSylSim = 0;
+
+        topicVectors.forEach(tv => {
+            const sim = cosineSimilarity(candVec, tv);
+            if (sim > maxSylSim) maxSylSim = sim;
+        });
+
+        if (maxSylSim < 0.40) {
+            matchedChunkIds.add(cand.chunk.chunk_id);
+            otherTopics.push({
+                topic_id: `other_topic_${otherTopicIdx++}`,
+                title: cand.title,
+                unit: "Other Topics Found in Study Material",
+                section: "",
+                hierarchy_number: cand.hierarchy_number,
+                full_context: `Other Topics > ${cand.title}`,
+                is_other_topic: true,
+                similarity_score: 1.0,
+                confidence_pct: 100.0,
+                matches: [{
+                    chunk_id: cand.chunk.chunk_id,
+                    text: cand.chunk.text,
+                    page_number: cand.chunk.page_number,
+                    type: cand.chunk.type,
+                    source: cand.chunk.source,
+                    score: 1.0,
+                    similarity_score: 1.0,
+                    confidence_pct: 100.0
+                }]
+            });
+        }
+    });
+
+    // Remaining unmatched chunks
+    const remainingUnmatched = chunks.filter(c => !matchedChunkIds.has(c.chunk_id));
+    remainingUnmatched.forEach(c => {
+        const lines = c.text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length >= 4);
+        const rawTitle = lines.length > 0 ? lines[0].substring(0, 60) : `Additional Notes (${c.source} Page ${c.page_number})`;
+        const cleanTitle = rawTitle.replace(/^[#*\-•\d\.\s]+/, "").trim() || `Additional Notes (${c.source} Page ${c.page_number})`;
+
+        otherTopics.push({
+            topic_id: `other_topic_${otherTopicIdx++}`,
+            title: cleanTitle,
+            unit: "Other Topics Found in Study Material",
+            section: "General Notes",
             hierarchy_number: "*",
-            full_context: "Additional extracted notes and materials",
-            matches: unmatchedChunks.map(c => ({
+            full_context: `Other Topics > ${cleanTitle}`,
+            is_other_topic: true,
+            similarity_score: 0.85,
+            confidence_pct: 85.0,
+            matches: [{
                 chunk_id: c.chunk_id,
                 text: c.text,
                 page_number: c.page_number,
                 type: c.type,
                 source: c.source,
-                score: 0.5,
-                similarity_score: 0.5,
-                confidence_pct: 50.0
-            }))
+                score: 0.85,
+                similarity_score: 0.85,
+                confidence_pct: 85.0
+            }]
         });
-    }
+    });
 
-    return matchedResults;
+    return {
+        syllabus_topics: syllabusResults,
+        other_topics: otherTopics,
+        topics: [...syllabusResults, ...otherTopics]
+    };
 }
 
-function clientComputeCoverage(topics) {
-    const totalTopics = topics.filter(t => t.topic_id !== "topic_uncategorized_notes").length;
+function clientComputeCoverage(syllabusTopics) {
+    const totalTopics = syllabusTopics.length;
     let matchedTopics = 0;
     let totalExcerpts = 0;
     const missingTopics = [];
 
-    topics.forEach(t => {
-        if (t.topic_id === "topic_uncategorized_notes") return;
+    syllabusTopics.forEach(t => {
         if (t.matches && t.matches.length > 0) {
             matchedTopics++;
             totalExcerpts += t.matches.length;
@@ -839,13 +956,13 @@ async function runClientSidePipeline(studyFilesArr, sylFile, sylText, threshold,
 
     const topics = clientParseSyllabus(syllabusContent);
 
-    // 3. Match topics & chunks
+    // 3. Match topics & chunks + detect Other Topics
     progressStatusTitle.textContent = "Performing AI semantic vector matching...";
     progressBarFill.style.width = "75%";
     progressPct.textContent = "75%";
 
-    const matchedTopics = clientTfidfMatching(topics, chunks, threshold);
-    const coverage = clientComputeCoverage(matchedTopics);
+    const matchData = clientTfidfMatching(topics, chunks, threshold);
+    const coverage = clientComputeCoverage(matchData.syllabus_topics);
 
     // 4. Complete
     progressBarFill.style.width = "100%";
@@ -857,7 +974,9 @@ async function runClientSidePipeline(studyFilesArr, sylFile, sylText, threshold,
         study_file: studyFilesArr.map(f => f.name).join(", "),
         syllabus_file: sylFile ? sylFile.name : "Pasted Syllabus Text",
         threshold: threshold,
-        topics: matchedTopics,
+        syllabus_topics: matchData.syllabus_topics,
+        other_topics: matchData.other_topics,
+        topics: matchData.topics,
         coverage: coverage
     };
 
@@ -867,7 +986,168 @@ async function runClientSidePipeline(studyFilesArr, sylFile, sylText, threshold,
     }, 400);
 }
 
-// --- Preview Rendering ---
+// --- Topic Selection & Preview Rendering ---
+
+function updateSelectionStats() {
+    const allTopicCheckboxes = document.querySelectorAll('.topic-chk');
+    let selectedCount = 0;
+
+    allTopicCheckboxes.forEach(chk => {
+        if (chk.checked) {
+            const topicId = chk.dataset.topicId;
+            const itemEl = document.querySelector(`.accordion-item[data-topic-id="${topicId}"]`);
+            if (itemEl) {
+                const excerptChks = itemEl.querySelectorAll('.excerpt-chk');
+                if (excerptChks.length === 0 || Array.from(excerptChks).some(ec => ec.checked)) {
+                    selectedCount++;
+                }
+            } else {
+                selectedCount++;
+            }
+        }
+    });
+
+    const selCounterEl = document.getElementById("selection-counter");
+    if (selCounterEl) {
+        selCounterEl.textContent = `${selectedCount} selected`;
+    }
+    const btnCountEl = document.getElementById("btn-topic-count");
+    if (btnCountEl) {
+        btnCountEl.textContent = selectedCount;
+    }
+}
+
+function createTopicAccordionItem(topic, defaultChecked = true) {
+    const matchesCount = topic.matches ? topic.matches.length : 0;
+
+    const accItem = document.createElement("div");
+    accItem.className = "accordion-item";
+    accItem.dataset.topicId = topic.topic_id;
+
+    const accHeader = document.createElement("div");
+    accHeader.className = "accordion-header";
+
+    // Topic Selection Checkbox in Header
+    const chkLabel = document.createElement("label");
+    chkLabel.className = "topic-check-label";
+    chkLabel.onclick = (e) => e.stopPropagation();
+
+    const topicChk = document.createElement("input");
+    topicChk.type = "checkbox";
+    topicChk.className = "topic-chk";
+    topicChk.dataset.topicId = topic.topic_id;
+    topicChk.checked = defaultChecked && matchesCount > 0;
+    if (matchesCount === 0) {
+        topicChk.checked = false;
+        topicChk.disabled = true;
+    }
+
+    chkLabel.appendChild(topicChk);
+    accHeader.appendChild(chkLabel);
+
+    const titleBlock = document.createElement("div");
+    titleBlock.className = "accordion-title-block";
+
+    if (topic.hierarchy_number && topic.hierarchy_number !== "*") {
+        const numSpan = document.createElement("span");
+        numSpan.className = "accordion-num";
+        numSpan.textContent = topic.hierarchy_number;
+        titleBlock.appendChild(numSpan);
+    }
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "accordion-title";
+    titleSpan.textContent = topic.title;
+    titleSpan.title = topic.full_context || topic.title;
+    titleBlock.appendChild(titleSpan);
+
+    accHeader.appendChild(titleBlock);
+
+    const metaBlock = document.createElement("div");
+    metaBlock.className = "accordion-meta-block";
+
+    const countBadge = document.createElement("span");
+    countBadge.className = matchesCount > 0 ? "match-count-badge" : "match-count-badge empty";
+    countBadge.textContent = matchesCount > 0 ? `${matchesCount} excerpt${matchesCount > 1 ? 's' : ''}` : 'No match';
+    metaBlock.appendChild(countBadge);
+
+    const chevron = document.createElement("span");
+    chevron.className = "chevron-icon";
+    chevron.textContent = "▼";
+    metaBlock.appendChild(chevron);
+
+    accHeader.appendChild(metaBlock);
+
+    const accBody = document.createElement("div");
+    accBody.className = "accordion-body";
+
+    if (matchesCount === 0) {
+        const noMatchMsg = document.createElement("p");
+        noMatchMsg.className = "no-match-msg";
+        noMatchMsg.textContent = "No matching excerpts extracted for this topic in uploaded study material.";
+        accBody.appendChild(noMatchMsg);
+    } else {
+        topic.matches.forEach((match, mIdx) => {
+            const matchCard = document.createElement("div");
+            matchCard.className = "match-card";
+
+            const matchTop = document.createElement("div");
+            matchTop.className = "match-top";
+
+            const labelCheck = document.createElement("label");
+            labelCheck.className = "match-check-label";
+
+            const chk = document.createElement("input");
+            chk.type = "checkbox";
+            chk.className = "excerpt-chk";
+            chk.checked = defaultChecked;
+            chk.id = `chk-${topic.topic_id}-${match.chunk_id}`;
+
+            const chkSpan = document.createElement("span");
+            chkSpan.textContent = ` Include Excerpt #${mIdx + 1} (${match.source} Page ${match.page_number})`;
+
+            labelCheck.appendChild(chk);
+            labelCheck.appendChild(chkSpan);
+            matchTop.appendChild(labelCheck);
+
+            const scoreBadge = document.createElement("span");
+            scoreBadge.className = "confidence-pill";
+            scoreBadge.textContent = `Match Score: ${(match.similarity_score * 100).toFixed(1)}%`;
+            matchTop.appendChild(scoreBadge);
+
+            matchCard.appendChild(matchTop);
+
+            const snippetPara = document.createElement("p");
+            snippetPara.className = "match-snippet";
+            snippetPara.textContent = match.text;
+            matchCard.appendChild(snippetPara);
+
+            accBody.appendChild(matchCard);
+
+            chk.addEventListener("change", () => {
+                const siblingChks = accBody.querySelectorAll(".excerpt-chk");
+                const hasAnyChecked = Array.from(siblingChks).some(c => c.checked);
+                topicChk.checked = hasAnyChecked;
+                updateSelectionStats();
+            });
+        });
+    }
+
+    topicChk.addEventListener("change", () => {
+        const childExcerpts = accBody.querySelectorAll(".excerpt-chk");
+        childExcerpts.forEach(ec => ec.checked = topicChk.checked);
+        updateSelectionStats();
+    });
+
+    accItem.appendChild(accHeader);
+    accItem.appendChild(accBody);
+
+    accHeader.addEventListener("click", () => {
+        accItem.classList.toggle("open");
+    });
+
+    return accItem;
+}
 
 function renderResultsPreview(results) {
     previewStudyFile.textContent = results.study_file;
@@ -898,119 +1178,104 @@ function renderResultsPreview(results) {
     }
     
     resultsAccordion.innerHTML = "";
+
+    const syllabusTopics = results.syllabus_topics || (results.topics ? results.topics.filter(t => !t.is_other_topic) : []);
+    const otherTopics = results.other_topics || (results.topics ? results.topics.filter(t => t.is_other_topic) : []);
+    
     let totalMatches = 0;
+    syllabusTopics.forEach(t => { totalMatches += (t.matches ? t.matches.length : 0); });
+    otherTopics.forEach(t => { totalMatches += (t.matches ? t.matches.length : 0); });
+
+    // Category 1: Syllabus Topics Block
+    const cat1Block = document.createElement("div");
+    cat1Block.className = "category-block";
+
+    const cat1Header = document.createElement("div");
+    cat1Header.className = "category-header";
+    cat1Header.innerHTML = `
+        <div class="category-title">
+            <span>📘 CATEGORY 1 — SYLLABUS TOPICS</span>
+        </div>
+        <span class="category-badge">${syllabusTopics.length} Topics</span>
+    `;
+    cat1Block.appendChild(cat1Header);
+
     let currentUnit = null;
-
-    results.topics.forEach(topic => {
-        const matchesCount = topic.matches ? topic.matches.length : 0;
-        totalMatches += matchesCount;
-
+    syllabusTopics.forEach(topic => {
         if (topic.unit && topic.unit !== currentUnit) {
             currentUnit = topic.unit;
             const unitHeader = document.createElement("div");
             unitHeader.className = "unit-header-accordion";
             unitHeader.textContent = currentUnit;
-            resultsAccordion.appendChild(unitHeader);
+            cat1Block.appendChild(unitHeader);
         }
-
-        const accItem = document.createElement("div");
-        accItem.className = "accordion-item";
-        accItem.dataset.topicId = topic.topic_id;
-
-        const accHeader = document.createElement("div");
-        accHeader.className = "accordion-header";
-        
-        const titleBlock = document.createElement("div");
-        titleBlock.className = "accordion-title-block";
-        
-        if (topic.hierarchy_number) {
-            const numSpan = document.createElement("span");
-            numSpan.className = "accordion-num";
-            numSpan.textContent = topic.hierarchy_number;
-            titleBlock.appendChild(numSpan);
-        }
-        
-        const titleSpan = document.createElement("span");
-        titleSpan.className = "accordion-title";
-        titleSpan.textContent = topic.title;
-        titleSpan.title = topic.full_context;
-        titleBlock.appendChild(titleSpan);
-        
-        accHeader.appendChild(titleBlock);
-
-        const metaBlock = document.createElement("div");
-        metaBlock.className = "accordion-meta-block";
-        
-        const countBadge = document.createElement("span");
-        countBadge.className = matchesCount > 0 ? "match-count-badge" : "match-count-badge empty";
-        countBadge.textContent = matchesCount > 0 ? `${matchesCount} excerpt${matchesCount > 1 ? 's' : ''}` : 'No match';
-        metaBlock.appendChild(countBadge);
-
-        const chevron = document.createElement("span");
-        chevron.className = "chevron-icon";
-        chevron.textContent = "▼";
-        metaBlock.appendChild(chevron);
-
-        accHeader.appendChild(metaBlock);
-
-        const accBody = document.createElement("div");
-        accBody.className = "accordion-body";
-
-        if (matchesCount === 0) {
-            const noMatchMsg = document.createElement("p");
-            noMatchMsg.className = "no-match-msg";
-            noMatchMsg.textContent = "No matching excerpts extracted for this topic.";
-            accBody.appendChild(noMatchMsg);
-        } else {
-            topic.matches.forEach((match, mIdx) => {
-                const matchCard = document.createElement("div");
-                matchCard.className = "match-card";
-
-                const matchTop = document.createElement("div");
-                matchTop.className = "match-top";
-
-                const labelCheck = document.createElement("label");
-                labelCheck.className = "match-check-label";
-                
-                const chk = document.createElement("input");
-                chk.type = "checkbox";
-                chk.checked = true;
-                chk.id = `chk-${topic.topic_id}-${match.chunk_id}`;
-                
-                const chkSpan = document.createElement("span");
-                chkSpan.textContent = ` Include Excerpt #${mIdx + 1} (${match.source} Page ${match.page_number})`;
-                
-                labelCheck.appendChild(chk);
-                labelCheck.appendChild(chkSpan);
-                matchTop.appendChild(labelCheck);
-
-                const scoreBadge = document.createElement("span");
-                scoreBadge.className = "confidence-pill";
-                scoreBadge.textContent = `Match Score: ${(match.similarity_score * 100).toFixed(1)}%`;
-                matchTop.appendChild(scoreBadge);
-
-                matchCard.appendChild(matchTop);
-
-                const snippetPara = document.createElement("p");
-                snippetPara.className = "match-snippet";
-                snippetPara.textContent = match.text;
-                matchCard.appendChild(snippetPara);
-
-                accBody.appendChild(matchCard);
-            });
-        }
-
-        accItem.appendChild(accHeader);
-        accItem.appendChild(accBody);
-
-        accHeader.addEventListener("click", () => {
-            accItem.classList.toggle("open");
-        });
-
-        resultsAccordion.appendChild(accItem);
+        const itemEl = createTopicAccordionItem(topic, true);
+        cat1Block.appendChild(itemEl);
     });
+    resultsAccordion.appendChild(cat1Block);
+
+    // Category 2: Other Topics Found in Study Material Block
+    const cat2Block = document.createElement("div");
+    cat2Block.className = "category-block";
+
+    const cat2Header = document.createElement("div");
+    cat2Header.className = "category-header";
+    cat2Header.innerHTML = `
+        <div class="category-title">
+            <span>💡 CATEGORY 2 — OTHER TOPICS FOUND IN STUDY MATERIAL</span>
+        </div>
+        <span class="category-badge">${otherTopics.length} Topics</span>
+    `;
+    cat2Block.appendChild(cat2Header);
+
+    if (otherTopics.length === 0) {
+        const emptyCard = document.createElement("div");
+        emptyCard.className = "empty-topics-card";
+        emptyCard.textContent = "No additional topics were found in the uploaded study material.";
+        cat2Block.appendChild(emptyCard);
+    } else {
+        otherTopics.forEach(topic => {
+            const itemEl = createTopicAccordionItem(topic, true);
+            cat2Block.appendChild(itemEl);
+        });
+    }
+    resultsAccordion.appendChild(cat2Block);
 
     previewTotalMatches.textContent = totalMatches;
+    updateSelectionStats();
+
+    // Wire Select All / Clear All toolbar buttons
+    if (btnSelectAll) {
+        btnSelectAll.onclick = () => {
+            document.querySelectorAll('.topic-chk:not(:disabled)').forEach(c => c.checked = true);
+            document.querySelectorAll('.excerpt-chk').forEach(c => c.checked = true);
+            updateSelectionStats();
+        };
+    }
+    if (btnClearAll) {
+        btnClearAll.onclick = () => {
+            document.querySelectorAll('.topic-chk').forEach(c => c.checked = false);
+            document.querySelectorAll('.excerpt-chk').forEach(c => c.checked = false);
+            updateSelectionStats();
+        };
+    }
+}
+
+// Deduplicate and merge overlapping chunks
+function deduplicateMatches(matches) {
+    if (!matches || matches.length === 0) return [];
+    const cleaned = [];
+    const seen = new Set();
+    
+    matches.forEach(m => {
+        const text = (m.text || "").trim();
+        if (!text) return;
+        const norm = text.split(/\s+/).slice(0, 25).join(" ");
+        if (seen.has(norm)) return;
+        seen.add(norm);
+        cleaned.push(m);
+    });
+    return cleaned;
 }
 
 // --- Generate & Export Notes (Server or Client Fallback) ---
@@ -1019,50 +1284,70 @@ generateDocxBtn.addEventListener("click", async () => {
     if (!rawResults) return;
 
     const exportFormat = document.querySelector('input[name="export_format"]:checked').value;
+    const allTopics = (rawResults.syllabus_topics || []).concat(rawResults.other_topics || []).length > 0
+        ? (rawResults.syllabus_topics || []).concat(rawResults.other_topics || [])
+        : (rawResults.topics || []);
+
+    const selectedTopicIds = [];
     const payloadTopics = [];
 
-    rawResults.topics.forEach(topic => {
+    allTopics.forEach(topic => {
         const itemEl = document.querySelector(`.accordion-item[data-topic-id="${topic.topic_id}"]`);
-        const filteredMatches = [];
+        const topicChk = itemEl ? itemEl.querySelector(`.topic-chk`) : null;
 
+        if (topicChk && !topicChk.checked) {
+            return;
+        }
+
+        const filteredMatches = [];
         if (topic.matches) {
             topic.matches.forEach(match => {
                 if (itemEl) {
                     const chk = itemEl.querySelector(`#chk-${topic.topic_id}-${match.chunk_id}`);
-                    if (chk && chk.checked) {
+                    if (chk && chk.checked && match.text && match.text.trim()) {
                         filteredMatches.push(match);
                     }
-                } else {
+                } else if (match.text && match.text.trim()) {
                     filteredMatches.push(match);
                 }
             });
         }
 
-        payloadTopics.push({
-            topic_id: topic.topic_id,
-            title: topic.title,
-            unit: topic.unit,
-            section: topic.section,
-            hierarchy_number: topic.hierarchy_number,
-            full_context: topic.full_context,
-            matches: filteredMatches
-        });
+        const deduplicated = deduplicateMatches(filteredMatches);
+        if (deduplicated.length > 0) {
+            selectedTopicIds.push(topic.topic_id);
+            payloadTopics.push({
+                topic_id: topic.topic_id,
+                title: topic.title,
+                unit: topic.unit,
+                section: topic.section,
+                hierarchy_number: topic.hierarchy_number,
+                full_context: topic.full_context,
+                matches: deduplicated
+            });
+        }
     });
+
+    if (payloadTopics.length === 0) {
+        alert("Some selected topics do not contain extractable source content. Please review the selection and try again.");
+        return;
+    }
 
     try {
         generateDocxBtn.classList.add("disabled");
         generateDocxBtn.setAttribute("disabled", "true");
-        generateDocxBtn.textContent = `Generating ${exportFormat.toUpperCase()}...`;
+        generateDocxBtn.textContent = `Generating ${exportFormat.toUpperCase()} (${payloadTopics.length} Topics)...`;
 
         const apiBase = getApiBaseUrl();
 
-        // 1. Check if backend is available
+        // 1. Send selected topic IDs to FastAPI Backend
         if (taskId && !taskId.startsWith("client_")) {
             try {
                 const response = await fetch(`${apiBase}/api/generate/${taskId}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
+                        selected_topic_ids: selectedTopicIds,
                         topics: payloadTopics,
                         export_format: exportFormat
                     })
@@ -1072,7 +1357,7 @@ generateDocxBtn.addEventListener("click", async () => {
                     const data = await response.json();
                     directDownloadLink.href = `${apiBase}${data.download_url}`;
                     downloadFilename.textContent = `extracted_notes.${data.format}`;
-                    downloadFileSize.textContent = `Format: ${data.format.toUpperCase()} (Times New Roman 12-14pt Pure Black)`;
+                    downloadFileSize.textContent = `Format: ${data.format.toUpperCase()} (${payloadTopics.length} Topics | Times New Roman 12-14pt Pure Black)`;
                     directDownloadLink.querySelector("span").textContent = `Download ${data.format.toUpperCase()}`;
                     
                     const docxIcon = document.querySelector(".docx-icon");
@@ -1082,6 +1367,12 @@ generateDocxBtn.addEventListener("click", async () => {
 
                     showStage(downloadStage);
                     return;
+                } else {
+                    const errData = await response.json().catch(() => ({}));
+                    if (response.status === 400 && errData.detail) {
+                        alert(errData.detail);
+                        return;
+                    }
                 }
             } catch (backendErr) {
                 console.warn("[Mento.AI] Backend generator unavailable, falling back to client generation...", backendErr);
@@ -1103,7 +1394,7 @@ generateDocxBtn.addEventListener("click", async () => {
     } finally {
         generateDocxBtn.classList.remove("disabled");
         generateDocxBtn.removeAttribute("disabled");
-        generateDocxBtn.innerHTML = `<span>Compile & Export Notes</span><span class="btn-glow"></span>`;
+        generateDocxBtn.innerHTML = `<span>✨ Compile &amp; Export Notes (<span id="btn-topic-count">${payloadTopics.length}</span> Topics)</span><span class="btn-glow"></span>`;
     }
 });
 

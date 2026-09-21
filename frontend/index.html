@@ -182,6 +182,18 @@
         </div>
       </div>
 
+      <!-- Topic Selection Toolbar -->
+      <div class="selection-toolbar">
+        <div class="selection-info">
+          <span class="selection-title">Select Topics for Download</span>
+          <span class="selection-counter-badge" id="selection-counter">0 selected</span>
+        </div>
+        <div class="selection-buttons">
+          <button type="button" class="btn-selection-action" id="btn-select-all">✓ Select All</button>
+          <button type="button" class="btn-selection-action" id="btn-clear-all">✕ Clear All</button>
+        </div>
+      </div>
+
       <!-- Results Accordion (built dynamically by app.js) -->
       <div class="results-accordion" id="results-accordion"></div>
 
@@ -200,7 +212,7 @@
           </label>
         </div>
         <button class="btn-generate" id="generate-docx-btn" type="button">
-          <span>✨ Compile &amp; Export Notes</span>
+          <span>✨ Compile &amp; Export Notes (<span id="btn-topic-count">0</span> Topics)</span>
           <span class="btn-glow"></span>
         </button>
       </div>

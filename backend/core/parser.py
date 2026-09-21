@@ -30,13 +30,15 @@ def parse_pdf(
     file_path: str, 
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
     math_mode: bool = False,
-    handwriting_mode: bool = False
+    handwriting_mode: bool = False,
+    source_name: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Parse a PDF file page by page.
     Uses direct text extraction, math symbol normalization, and OCR (RapidOCR/Tesseract).
     """
     chunks = []
+    doc_source = source_name or os.path.basename(file_path)
     try:
         doc = pymupdf.open(file_path)
         total_pages = len(doc)
@@ -85,7 +87,7 @@ def parse_pdf(
                     "text": cleaned_text,
                     "page_number": page_num,
                     "type": chunk_type,
-                    "source": os.path.basename(file_path)
+                    "source": doc_source
                 })
         
         doc.close()
@@ -98,10 +100,12 @@ def parse_pdf(
 def parse_docx(
     file_path: str,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
-    math_mode: bool = False
+    math_mode: bool = False,
+    source_name: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """Parse a DOCX file into paragraph blocks with optional math normalization."""
     chunks = []
+    doc_source = source_name or os.path.basename(file_path)
     try:
         logger.info(f"Parsing DOCX {file_path}")
         if progress_callback:
@@ -134,7 +138,7 @@ def parse_docx(
                     "text": "\n\n".join(current_chunk),
                     "page_number": (chunk_idx // 3) + 1,
                     "type": "digital",
-                    "source": os.path.basename(file_path)
+                    "source": doc_source
                 })
                 current_chunk = []
                 current_len = 0
@@ -146,7 +150,7 @@ def parse_docx(
                 "text": "\n\n".join(current_chunk),
                 "page_number": (chunk_idx // 3) + 1,
                 "type": "digital",
-                "source": os.path.basename(file_path)
+                "source": doc_source
             })
             
         if progress_callback:
@@ -161,10 +165,12 @@ def parse_docx(
 def parse_txt(
     file_path: str,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
-    math_mode: bool = False
+    math_mode: bool = False,
+    source_name: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """Parse plain text files into chunks."""
     chunks = []
+    doc_source = source_name or os.path.basename(file_path)
     try:
         logger.info(f"Parsing TXT {file_path}")
         if progress_callback:
@@ -190,7 +196,7 @@ def parse_txt(
                     "text": "\n\n".join(current_chunk),
                     "page_number": (chunk_idx // 3) + 1,
                     "type": "digital",
-                    "source": os.path.basename(file_path)
+                    "source": doc_source
                 })
                 current_chunk = []
                 current_len = 0
@@ -202,7 +208,7 @@ def parse_txt(
                 "text": "\n\n".join(current_chunk),
                 "page_number": (chunk_idx // 3) + 1,
                 "type": "digital",
-                "source": os.path.basename(file_path)
+                "source": doc_source
             })
             
         if progress_callback:
@@ -218,11 +224,13 @@ def parse_image(
     file_path: str,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
     math_mode: bool = False,
-    handwriting_mode: bool = False
+    handwriting_mode: bool = False,
+    source_name: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """Parse image file (PNG, JPG, JPEG, WEBP) using OCR or Handwriting Engine."""
     from backend.core.ocr_engine import extract_text_from_image
     chunks = []
+    doc_source = source_name or os.path.basename(file_path)
     try:
         logger.info(f"Parsing Image {file_path} (Handwriting: {handwriting_mode}, Math: {math_mode})")
         if progress_callback:
@@ -246,7 +254,7 @@ def parse_image(
                 "text": cleaned_text,
                 "page_number": 1,
                 "type": "handwriting_ocr" if handwriting_mode else "ocr",
-                "source": os.path.basename(file_path)
+                "source": doc_source
             })
     except Exception as e:
         logger.error(f"Error parsing image file {file_path}: {e}")
@@ -258,17 +266,18 @@ def parse_document(
     file_path: str,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
     math_mode: bool = False,
-    handwriting_mode: bool = False
+    handwriting_mode: bool = False,
+    source_name: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """Main document parsing router."""
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".pdf":
-        return parse_pdf(file_path, progress_callback, math_mode, handwriting_mode)
+        return parse_pdf(file_path, progress_callback, math_mode, handwriting_mode, source_name=source_name)
     elif ext == ".docx":
-        return parse_docx(file_path, progress_callback, math_mode)
+        return parse_docx(file_path, progress_callback, math_mode, source_name=source_name)
     elif ext in [".txt", ".md"]:
-        return parse_txt(file_path, progress_callback, math_mode)
+        return parse_txt(file_path, progress_callback, math_mode, source_name=source_name)
     elif ext in [".png", ".jpg", ".jpeg", ".webp"]:
-        return parse_image(file_path, progress_callback, math_mode, handwriting_mode)
+        return parse_image(file_path, progress_callback, math_mode, handwriting_mode, source_name=source_name)
     else:
         raise ValueError(f"Unsupported file format '{ext}'")

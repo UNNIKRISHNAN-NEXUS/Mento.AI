@@ -2,7 +2,7 @@
 """
 Mento.AI FastAPI Application
 Handles multi-file uploads, text syllabus inputs, SSE progress tracking,
-preview results, and PDF/DOCX format downloads.
+preview results with Syllabus Topics & Other Topics selection, and PDF/DOCX format downloads.
 """
 
 import os
@@ -12,7 +12,7 @@ import asyncio
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.utils.file_utils import (
@@ -47,15 +47,17 @@ ALLOWED_DOCS = {".pdf", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".webp"}
 
 def run_extraction_pipeline(
     task_id: str,
-    study_file_paths: List[str],
+    study_files_info: List[Dict[str, str]],
     syllabus_file_path: str,
+    syllabus_orig_name: str,
     threshold: float,
     math_mode: bool = False,
     handwriting_mode: bool = False
 ):
     """
     Background worker pipeline.
-    Parses study material files (single or multiple) and syllabus, performs semantic matching.
+    Parses study material files (single or multiple) and syllabus, performs semantic matching,
+    detects non-syllabus Other Topics from notes, and compiles the result structure.
     """
     try:
         tasks_progress[task_id] = {"status": "Parsing syllabus...", "progress": 10}
@@ -74,9 +76,12 @@ def run_extraction_pipeline(
         
         # 2. Parse study materials (supports multiple files)
         all_chunks = []
-        total_files = len(study_file_paths)
+        total_files = len(study_files_info)
         
-        for idx, file_path in enumerate(study_file_paths):
+        for idx, item in enumerate(study_files_info):
+            file_path = item["path"] if isinstance(item, dict) else item
+            orig_name = item.get("filename", os.path.basename(file_path)) if isinstance(item, dict) else os.path.basename(file_path)
+            
             def parser_progress(stage: str, current: int, total: int):
                 # Map file index to 30%-65% progress range
                 step_pct = 30 + int(((idx + (current / total)) / total_files) * 35)
@@ -89,7 +94,8 @@ def run_extraction_pipeline(
                 file_path, 
                 progress_callback=parser_progress,
                 math_mode=math_mode,
-                handwriting_mode=handwriting_mode
+                handwriting_mode=handwriting_mode,
+                source_name=orig_name
             )
             all_chunks.extend(chunks)
             
@@ -97,29 +103,34 @@ def run_extraction_pipeline(
             raise ValueError("No text could be extracted from the uploaded study material(s).")
             
         tasks_progress[task_id] = {
-            "status": "Initializing AI semantic models...",
+            "status": "Initializing AI semantic vector matching...",
             "progress": 70
         }
         logger.info(f"Task {task_id}: Study materials parsed. Total {len(all_chunks)} chunks pooled.")
         
-        # 3. Match syllabus to document using SBERT + FAISS
-        matched_results = match_syllabus_to_document(
+        # 3. Match syllabus to document + Detect Other Topics from study material
+        match_data = match_syllabus_to_document(
             topics=topics,
             chunks=all_chunks,
             similarity_threshold=threshold,
             top_k=5
         )
         
-        # 4. Compute coverage audit
-        coverage_report = compute_coverage_audit(matched_results)
-        
-        # Store results in-memory and on disk (for Vercel cross-instance persistence)
-        study_filenames = [os.path.basename(p) for p in study_file_paths]
+        # Store structured results in-memory and on disk (for cross-instance serverless retrieval)
+        study_display_names = [
+            (item.get("filename") if isinstance(item, dict) else os.path.basename(item))
+            for item in study_files_info
+        ]
         results_data = {
-            "topics": matched_results,
-            "coverage": coverage_report,
-            "study_file": ", ".join(study_filenames),
-            "syllabus_file": os.path.basename(syllabus_file_path)
+            "task_id": task_id,
+            "syllabus_topics": match_data.get("syllabus_topics", []),
+            "other_topics": match_data.get("other_topics", []),
+            "topics": match_data.get("topics", []),
+            "chunks": match_data.get("chunks", {}),
+            "coverage": match_data.get("coverage", {}),
+            "study_file": ", ".join(study_display_names),
+            "syllabus_file": syllabus_orig_name,
+            "threshold": threshold
         }
         tasks_results[task_id] = results_data
         
@@ -168,7 +179,7 @@ async def upload_files(
     upload_path, _ = get_task_paths(task_id)
     
     # Save Study Material files (supports multiple)
-    saved_study_paths = []
+    saved_study_info = []
     CHUNK_SIZE = 1024 * 1024
     
     for i, s_file in enumerate(study_material):
@@ -186,14 +197,16 @@ async def upload_files(
                 if not chunk:
                     break
                 buffer.write(chunk)
-        saved_study_paths.append(file_path)
+        saved_study_info.append({"path": file_path, "filename": s_file.filename})
         
     # Save Syllabus file or text
     syllabus_file_path = os.path.join(upload_path, "syllabus.txt")
+    syllabus_orig_name = "Pasted Syllabus Text"
     
     if syllabus_text and syllabus_text.strip():
         with open(syllabus_file_path, "w", encoding="utf-8") as f:
             f.write(syllabus_text.strip())
+        syllabus_orig_name = "Pasted Syllabus Text"
     elif syllabus:
         syll_ext = os.path.splitext(syllabus.filename)[1].lower()
         if syll_ext not in ALLOWED_DOCS:
@@ -208,6 +221,7 @@ async def upload_files(
                 if not chunk:
                     break
                 buffer.write(chunk)
+        syllabus_orig_name = syllabus.filename
                 
     tasks_progress[task_id] = {"status": "Files uploaded. Validating...", "progress": 5}
     
@@ -216,8 +230,9 @@ async def upload_files(
         logger.info(f"Task {task_id}: Running extraction pipeline synchronously on Vercel Serverless...")
         run_extraction_pipeline(
             task_id=task_id,
-            study_file_paths=saved_study_paths,
+            study_files_info=saved_study_info,
             syllabus_file_path=syllabus_file_path,
+            syllabus_orig_name=syllabus_orig_name,
             threshold=threshold,
             math_mode=math_mode,
             handwriting_mode=handwriting_mode
@@ -228,8 +243,9 @@ async def upload_files(
         background_tasks.add_task(
             run_extraction_pipeline,
             task_id=task_id,
-            study_file_paths=saved_study_paths,
+            study_files_info=saved_study_info,
             syllabus_file_path=syllabus_file_path,
+            syllabus_orig_name=syllabus_orig_name,
             threshold=threshold,
             math_mode=math_mode,
             handwriting_mode=handwriting_mode
@@ -268,7 +284,7 @@ async def get_processing_status(task_id: str, request: Request):
 @app.get("/api/results/{task_id}")
 @app.get("/results/{task_id}")
 async def get_results(task_id: str):
-    """Retrieve raw matched results for previewing."""
+    """Retrieve matched results and other detected topics for previewing."""
     if task_id in tasks_results:
         return tasks_results[task_id]
         
@@ -294,7 +310,7 @@ async def get_results(task_id: str):
 async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
     """
     Generates notes in requested format (DOCX or PDF).
-    Payload format: { "topics": [ ... ], "export_format": "docx" | "pdf" }
+    Payload format: { "selected_topic_ids": [...], "topics": [ ... ], "export_format": "docx" | "pdf" }
     """
     if task_id not in tasks_results:
         # Try loading from disk
@@ -310,26 +326,65 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
     if task_id not in tasks_results:
         raise HTTPException(status_code=404, detail="Task results not found.")
         
-    customized_topics = payload.get("topics")
-    if not customized_topics:
-        raise HTTPException(status_code=400, detail="Invalid request. Topics payload is empty.")
-        
+    task_data = tasks_results[task_id]
+    all_stored_topics = task_data.get("topics", [])
+    
+    selected_topic_ids = payload.get("selected_topic_ids")
+    client_custom_topics = payload.get("topics", [])
     export_format = payload.get("export_format", "docx").lower()
     if export_format not in ["docx", "pdf"]:
         export_format = "docx"
         
+    final_selected_topics = []
+    
+    if selected_topic_ids is not None:
+        selected_set = set(selected_topic_ids)
+        for topic in all_stored_topics:
+            if topic.get("topic_id") in selected_set:
+                custom_topic = next((ct for ct in client_custom_topics if ct.get("topic_id") == topic["topic_id"]), None)
+                if custom_topic and "matches" in custom_topic:
+                    topic_copy = dict(topic)
+                    topic_copy["matches"] = custom_topic["matches"]
+                    final_selected_topics.append(topic_copy)
+                else:
+                    final_selected_topics.append(topic)
+    elif client_custom_topics:
+        for ct in client_custom_topics:
+            if ct.get("matches"):
+                final_selected_topics.append(ct)
+    else:
+        final_selected_topics = [t for t in all_stored_topics if t.get("matches")]
+        
+    # Validate that at least one topic has valid text content
+    valid_topics = []
+    for t in final_selected_topics:
+        valid_matches = []
+        for m in t.get("matches", []):
+            if m.get("text") and m.get("text").strip():
+                valid_matches.append(m)
+        if valid_matches:
+            t_copy = dict(t)
+            t_copy["matches"] = valid_matches
+            valid_topics.append(t_copy)
+            
+    if not valid_topics:
+        raise HTTPException(
+            status_code=400,
+            detail="Some selected topics do not contain extractable source content. Please review the selection and try again."
+        )
+        
     _, output_path = get_task_paths(task_id)
     
     try:
-        study_name = tasks_results[task_id]["study_file"]
-        syllabus_name = tasks_results[task_id]["syllabus_file"]
+        study_name = task_data.get("study_file", "Study Material")
+        syllabus_name = task_data.get("syllabus_file", "Syllabus")
         title = "Extracted Study Notes"
         desc = f"Organized according to: {syllabus_name}\nSource material: {study_name}"
         
         if export_format == "pdf":
             output_file = os.path.join(output_path, "extracted_notes.pdf")
             generate_pdf(
-                matched_results=customized_topics,
+                matched_results=valid_topics,
                 output_path=output_file,
                 title=title,
                 description=desc
@@ -338,7 +393,7 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
         else:
             output_file = os.path.join(output_path, "extracted_notes.docx")
             generate_docx(
-                matched_results=customized_topics,
+                matched_results=valid_topics,
                 output_path=output_file,
                 title=title,
                 description=desc
@@ -365,7 +420,7 @@ async def download_file(task_id: str, format: str = "docx"):
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         filename = "extracted_notes.docx"
         
-    if not os.path.exists(output_file):
+    if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
         raise HTTPException(status_code=404, detail=f"{fmt.upper()} file not found. Generate it first.")
         
     return FileResponse(
@@ -383,8 +438,6 @@ async def health_check():
         "status": "healthy",
         "tesseract_ocr_available": TESSERACT_AVAILABLE
     }
-
-from fastapi.responses import HTMLResponse
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
