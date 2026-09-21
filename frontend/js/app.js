@@ -308,7 +308,18 @@ startProcessBtn.addEventListener("click", async () => {
 
         const data = await response.json();
         taskId = data.task_id;
-        startProgressMonitoring(taskId);
+        
+        if (data.results) {
+            // Instant result from synchronous Vercel Serverless execution
+            progressBarFill.style.width = "100%";
+            progressPct.textContent = "100%";
+            progressStatusTitle.textContent = "Extraction & matching complete!";
+            rawResults = data.results;
+            renderPreview(data.results);
+            showStage(previewStage);
+        } else {
+            startProgressMonitoring(taskId);
+        }
     } catch (err) {
         if (err.message.includes("Failed to fetch") || err.name === "TypeError") {
             const promptUrl = prompt(

@@ -6,12 +6,20 @@ Handles path definitions, upload/output directories, task ID generation, and cle
 
 import os
 import shutil
+import tempfile
 import time
 import uuid
 from typing import Tuple
 
-# Define paths relative to this file
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Detect Vercel environment
+IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"))
+
+# Define paths: Use /tmp on Vercel to avoid read-only filesystem errors
+if IS_VERCEL:
+    BASE_DIR = os.path.join(tempfile.gettempdir(), "mento_ai")
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 

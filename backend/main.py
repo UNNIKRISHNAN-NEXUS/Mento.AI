@@ -113,14 +113,23 @@ def run_extraction_pipeline(
         # 4. Compute coverage audit
         coverage_report = compute_coverage_audit(matched_results)
         
-        # Store results in-memory
+        # Store results in-memory and on disk (for Vercel cross-instance persistence)
         study_filenames = [os.path.basename(p) for p in study_file_paths]
-        tasks_results[task_id] = {
+        results_data = {
             "topics": matched_results,
             "coverage": coverage_report,
             "study_file": ", ".join(study_filenames),
             "syllabus_file": os.path.basename(syllabus_file_path)
         }
+        tasks_results[task_id] = results_data
+        
+        try:
+            _, task_output_dir = get_task_paths(task_id)
+            results_path = os.path.join(task_output_dir, "results.json")
+            with open(results_path, "w", encoding="utf-8") as f:
+                json.dump(results_data, f, ensure_ascii=False, indent=2)
+        except Exception as disk_err:
+            logger.warning(f"Could not write results.json to disk for task {task_id}: {disk_err}")
         
         tasks_progress[task_id] = {"status": "Matching completed successfully!", "progress": 100}
         logger.info(f"Task {task_id}: Pipeline finished successfully.")
@@ -145,7 +154,7 @@ async def upload_files(
 ):
     """
     Upload study material(s) and syllabus (file or raw text).
-    Returns a unique task_id.
+    Returns a unique task_id. On Vercel, executes synchronously.
     """
     clean_old_files()
     
@@ -202,23 +211,42 @@ async def upload_files(
                 
     tasks_progress[task_id] = {"status": "Files uploaded. Validating...", "progress": 5}
     
-    background_tasks.add_task(
-        run_extraction_pipeline,
-        task_id=task_id,
-        study_file_paths=saved_study_paths,
-        syllabus_file_path=syllabus_file_path,
-        threshold=threshold,
-        math_mode=math_mode,
-        handwriting_mode=handwriting_mode
-    )
-    
-    return {"task_id": task_id}
+    IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"))
+    if IS_VERCEL:
+        logger.info(f"Task {task_id}: Running extraction pipeline synchronously on Vercel Serverless...")
+        run_extraction_pipeline(
+            task_id=task_id,
+            study_file_paths=saved_study_paths,
+            syllabus_file_path=syllabus_file_path,
+            threshold=threshold,
+            math_mode=math_mode,
+            handwriting_mode=handwriting_mode
+        )
+        res = tasks_results.get(task_id)
+        return {"task_id": task_id, "results": res}
+    else:
+        background_tasks.add_task(
+            run_extraction_pipeline,
+            task_id=task_id,
+            study_file_paths=saved_study_paths,
+            syllabus_file_path=syllabus_file_path,
+            threshold=threshold,
+            math_mode=math_mode,
+            handwriting_mode=handwriting_mode
+        )
+        return {"task_id": task_id}
 
 @app.get("/api/process/{task_id}")
 @app.get("/process/{task_id}")
+@app.get("/api/progress/{task_id}")
+@app.get("/progress/{task_id}")
 async def get_processing_status(task_id: str, request: Request):
     """Server-Sent Events (SSE) progress streaming or JSON status endpoint."""
     if task_id not in tasks_progress:
+        # Check disk if results exist
+        _, task_output_dir = get_task_paths(task_id)
+        if os.path.exists(os.path.join(task_output_dir, "results.json")):
+            return {"status": "Matching completed successfully!", "progress": 100}
         raise HTTPException(status_code=404, detail="Task not found.")
         
     accept_header = request.headers.get("accept", "")
@@ -241,12 +269,25 @@ async def get_processing_status(task_id: str, request: Request):
 @app.get("/results/{task_id}")
 async def get_results(task_id: str):
     """Retrieve raw matched results for previewing."""
-    if task_id not in tasks_results:
-        raise HTTPException(
-            status_code=404, 
-            detail="Results not found. Task might still be processing or failed."
-        )
-    return tasks_results[task_id]
+    if task_id in tasks_results:
+        return tasks_results[task_id]
+        
+    # Disk fallback for serverless multi-instance persistence
+    _, task_output_dir = get_task_paths(task_id)
+    results_path = os.path.join(task_output_dir, "results.json")
+    if os.path.exists(results_path):
+        try:
+            with open(results_path, "r", encoding="utf-8") as f:
+                res = json.load(f)
+                tasks_results[task_id] = res
+                return res
+        except Exception as e:
+            logger.error(f"Failed to read results.json from disk for task {task_id}: {e}")
+
+    raise HTTPException(
+        status_code=404, 
+        detail="Results not found. Task might still be processing or failed."
+    )
 
 @app.post("/api/generate/{task_id}")
 @app.post("/generate/{task_id}")
@@ -255,6 +296,17 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
     Generates notes in requested format (DOCX or PDF).
     Payload format: { "topics": [ ... ], "export_format": "docx" | "pdf" }
     """
+    if task_id not in tasks_results:
+        # Try loading from disk
+        _, task_output_dir = get_task_paths(task_id)
+        results_path = os.path.join(task_output_dir, "results.json")
+        if os.path.exists(results_path):
+            try:
+                with open(results_path, "r", encoding="utf-8") as f:
+                    tasks_results[task_id] = json.load(f)
+            except Exception:
+                pass
+                
     if task_id not in tasks_results:
         raise HTTPException(status_code=404, detail="Task results not found.")
         
