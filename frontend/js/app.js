@@ -11,17 +11,14 @@ let syllabusMode = "file"; // "file" or "text"
 let taskId = null;
 let rawResults = null;
 
-// API Configuration — Auto-detect local, unified Vercel, or live Render backend
+// API Configuration — Defaults to same-origin for unified Vercel deployment
 function getApiBaseUrl() {
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return "";
-    }
     const savedUrl = localStorage.getItem("MENTO_BACKEND_URL");
     if (savedUrl && savedUrl.trim()) {
         return savedUrl.trim().replace(/\/+$/, '');
     }
-    // Default to live active Render backend
-    return 'https://mento-ai-backend-sc4k.onrender.com';
+    // Unified same-origin backend on Vercel and local
+    return "";
 }
 
 function setCustomBackendUrl(newUrl) {
