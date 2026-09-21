@@ -20,7 +20,7 @@ function getApiBaseUrl() {
     if (savedUrl && savedUrl.trim()) {
         return savedUrl.trim().replace(/\/+$/, '');
     }
-    return 'https://mento-ai-backend.onrender.com';
+    return 'https://mento-ai-backend-sc4k.onrender.com';
 }
 
 function setCustomBackendUrl(newUrl) {
