@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mento.AI — AI-Powered Syllabus Notes Extractor</title>
+<meta name="description" content="Upload your study material and syllabus. Mento.AI semantically extracts and compiles perfectly organized notes for every topic — zero data loss.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ── Aurora Background ── -->
+<div class="aurora-wrap">
+  <div class="aurora-blob aurora-1"></div>
+  <div class="aurora-blob aurora-2"></div>
+  <div class="aurora-blob aurora-3"></div>
+  <div class="aurora-blob aurora-4"></div>
+  <canvas id="particle-canvas"></canvas>
+</div>
+
+<!-- ── Navbar ── -->
+<nav class="navbar">
+  <div class="nav-inner">
+    <div class="nav-logo">
+      <span class="nav-logo-icon">🧠</span>
+      <span class="nav-logo-text">Mento<span>.AI</span></span>
+      <span class="nav-badge">Note Compiler</span>
+    </div>
+  </div>
+</nav>
+
+<!-- ── App Interface ── -->
+<section id="app" class="app-section">
+  <div class="app-header">
+    <h1 class="app-title">Study Material &amp; Syllabus Compiler</h1>
+    <p class="app-subtitle">Upload your study material documents (DOCX, PDF, TXT, images) and syllabus to extract, map, and compile topic-by-topic organized notes.</p>
+  </div>
+  <div class="app-card">
+
+    <!-- ─ Stage 1: Upload ─ -->
+    <div id="upload-stage" class="stage-section active">
+      <div class="upload-grid">
+
+        <!-- Study Material Dropzone -->
+        <div class="upload-zone" id="study-material-dropzone">
+          <input type="file" id="study-material-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" multiple class="file-input">
+          <div class="upload-zone-inner">
+            <div class="uz-icon-wrap">📄</div>
+            <h3>Study Material</h3>
+            <p class="uz-sub">Drag &amp; drop or click to browse</p>
+            <p class="uz-types">PDF, DOCX, TXT, PNG, JPG, WEBP</p>
+            <p class="uz-size">Multiple files supported</p>
+          </div>
+          <div class="file-badge" id="study-file-badge">
+            <div class="fb-header">
+              <div class="fb-check">✓</div>
+              <span id="study-status-title">Files Selected</span>
+            </div>
+            <div class="fb-names" id="study-file-names"></div>
+            <button class="fb-remove" id="remove-study-btn" type="button">🗑 Remove All</button>
+          </div>
+        </div>
+
+        <!-- Syllabus -->
+        <div class="syllabus-wrap">
+          <div class="syl-tabs">
+            <button class="syl-tab active" id="tab-syllabus-file" type="button">📎 Upload File</button>
+            <button class="syl-tab" id="tab-syllabus-text" type="button">✏️ Paste Text</button>
+          </div>
+          <!-- Syllabus Dropzone -->
+          <div class="upload-zone" id="syllabus-dropzone">
+            <input type="file" id="syllabus-input" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" class="file-input">
+            <div class="upload-zone-inner">
+              <div class="uz-icon-wrap">📋</div>
+              <h3>Syllabus</h3>
+              <p class="uz-sub">Drag &amp; drop or click to browse</p>
+              <p class="uz-types">PDF, DOCX, TXT, PNG, JPG, WEBP</p>
+            </div>
+            <div class="file-badge" id="syllabus-file-badge">
+              <div class="fb-header">
+                <div class="fb-check">✓</div>
+                <span>Syllabus Ready</span>
+              </div>
+              <div class="fb-names" id="syllabus-file-name"></div>
+              <button class="fb-remove" id="remove-syllabus-btn" type="button">🗑 Remove</button>
+            </div>
+          </div>
+          <!-- Syllabus Text Paste -->
+          <div class="syllabus-textbox hidden" id="syllabus-text-box">
+            <textarea id="syllabus-text-input" placeholder="Paste your syllabus here...&#10;&#10;Unit 1: Introduction to Machine Learning&#10;  1.1 Supervised Learning&#10;  1.2 Unsupervised Learning&#10;Unit 2: Neural Networks&#10;  2.1 Feedforward Networks&#10;  2.2 Backpropagation..."></textarea>
+          </div>
+        </div>
+      </div><!-- /upload-grid -->
+
+      <!-- Options Row -->
+      <div class="options-row">
+        <div class="threshold-group">
+          <label>
+            Similarity Threshold
+            <span class="tooltip-icon" title="Higher = stricter matching. Lower = more inclusive (may include loosely related content).">ⓘ</span>
+          </label>
+          <div class="slider-row">
+            <input type="range" id="threshold-slider" min="0.1" max="0.9" step="0.05" value="0.35">
+            <span class="slider-val" id="threshold-val">0.35</span>
+          </div>
+        </div>
+        <div class="toggle-group">
+          <label class="toggle-label" id="toggle-math-mode">
+            <input type="checkbox" id="chk-math-mode">
+            <span class="toggle-switch"></span>
+            <span>Enhanced Math Parsing</span>
+          </label>
+          <label class="toggle-label" id="toggle-handwriting-mode">
+            <input type="checkbox" id="chk-handwriting-mode">
+            <span class="toggle-switch"></span>
+            <span>Handwriting OCR</span>
+          </label>
+        </div>
+      </div><!-- /options-row -->
+
+      <button type="button" id="start-process-btn" class="btn-extract disabled" disabled>
+        <span>✨ Extract &amp; Match Notes</span>
+      </button>
+    </div><!-- /upload-stage -->
+
+    <!-- ─ Stage 2: Processing ─ -->
+    <div id="processing-stage" class="stage-section">
+      <div class="processing-wrap">
+        <div class="processing-orb">
+          <div class="orb-ring"></div>
+          <div class="orb-ring orb-ring-2"></div>
+          <div class="orb-core">🧠</div>
+        </div>
+        <h2 id="progress-status-title">Initializing AI Engine...</h2>
+        <p id="progress-status-sub">Please wait while Mento.AI processes your documents</p>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-bar-fill"></div>
+        </div>
+        <div class="progress-pct" id="progress-pct">0%</div>
+      </div>
+    </div><!-- /processing-stage -->
+
+    <!-- ─ Stage 3: Preview ─ -->
+    <div id="preview-stage" class="stage-section">
+      <div class="preview-header">
+        <h2>Review Extracted Notes</h2>
+        <p>Uncheck any excerpts you don't want in your final document, then export.</p>
+      </div>
+      <div class="preview-meta">
+        <div class="pm-item"><span class="pm-label">Material:</span><span id="preview-study-file">—</span></div>
+        <div class="pm-item"><span class="pm-label">Syllabus:</span><span id="preview-syllabus-file">—</span></div>
+        <div class="pm-item"><span class="pm-label">Total Excerpts:</span><span id="preview-total-matches">0</span></div>
+      </div>
+
+      <!-- Coverage Audit Card -->
+      <div class="coverage-audit-card">
+        <div class="audit-header">
+          <span class="audit-title">📊 Coverage Report</span>
+          <span class="audit-score-badge" id="audit-score-val">—%</span>
+        </div>
+        <div class="audit-stats">
+          <div class="audit-stat">
+            <span class="audit-stat-num" id="stat-matched-count">—</span>
+            <span class="audit-stat-label">Topics Matched</span>
+          </div>
+          <div class="audit-stat-div"></div>
+          <div class="audit-stat">
+            <span class="audit-stat-num" id="stat-missing-count">—</span>
+            <span class="audit-stat-label">Topics Missing</span>
+          </div>
+          <div class="audit-stat-div"></div>
+          <div class="audit-stat">
+            <span class="audit-stat-num" id="stat-snippets-count">—</span>
+            <span class="audit-stat-label">Excerpts Found</span>
+          </div>
+        </div>
+        <div class="missing-topics-box" id="missing-topics-box" style="display:none">
+          <div class="missing-topics-title">⚠️ Topics with no matching content in uploaded material:</div>
+          <ul class="missing-topics-list" id="missing-topics-list"></ul>
+        </div>
+      </div>
+
+      <!-- Results Accordion (built dynamically by app.js) -->
+      <div class="results-accordion" id="results-accordion"></div>
+
+      <!-- Preview Footer -->
+      <div class="preview-footer">
+        <button class="btn-ghost" id="back-to-upload-btn" type="button">← New Upload</button>
+        <div class="format-pick">
+          <span>Format:</span>
+          <label class="fmt-choice active" id="choice-docx">
+            <input type="radio" name="export_format" value="docx" checked>
+            <span>📄 DOCX</span>
+          </label>
+          <label class="fmt-choice" id="choice-pdf">
+            <input type="radio" name="export_format" value="pdf">
+            <span>📕 PDF</span>
+          </label>
+        </div>
+        <button class="btn-generate" id="generate-docx-btn" type="button">
+          <span>✨ Compile &amp; Export Notes</span>
+          <span class="btn-glow"></span>
+        </button>
+      </div>
+    </div><!-- /preview-stage -->
+
+    <!-- ─ Stage 4: Download ─ -->
+    <div id="download-stage" class="stage-section">
+      <div class="download-wrap">
+        <div class="dl-seal">✓</div>
+        <h2>Your Notes Are Ready!</h2>
+        <p>Perfectly organized, topic-by-topic — zero data loss.</p>
+        <div class="dl-card">
+          <div class="dl-w-icon docx-icon">W</div>
+          <div class="dl-card-info">
+            <strong id="download-filename">extracted_notes.docx</strong>
+            <span id="download-file-size">Ready for download</span>
+          </div>
+        </div>
+        <div class="dl-actions">
+          <button class="btn-ghost" id="restart-btn" type="button">↩ Start Over</button>
+          <a href="#" id="direct-download-link" class="btn-primary-hero">
+            <span>Download Notes</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </div><!-- /download-stage -->
+
+  </div><!-- /app-card -->
+</section>
+
+<!-- ── Footer ── -->
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-logo">
+      <span>🧠</span>
+      <span class="nav-logo-text">Mento<span>.AI</span></span>
+    </div>
+    <p class="footer-copy">© 2026 Mento.AI — Neural Indigo Design System. Powered by SBERT, FAISS &amp; RapidOCR.</p>
+    <div class="footer-tech">
+      <span>sentence-transformers</span>
+      <span>FAISS</span>
+      <span>FastAPI</span>
+      <span>RapidOCR</span>
+      <span>SSE Streaming</span>
+    </div>
+  </div>
+</footer>
+
+<!-- ── Visual FX (particles + scroll observer — kept inline, no app logic) ── -->
+<script>
+/* Particle Canvas */
+(function() {
+  const canvas = document.getElementById('particle-canvas');
+  const ctx = canvas.getContext('2d');
+  const COLORS = ['#6366f1','#a855f7','#06b6d4','#818cf8'];
+
+  function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+  window.addEventListener('resize', resize);
+  resize();
+
+  class Particle {
+    constructor() { this.reset(); }
+    reset() {
+      this.x     = Math.random() * canvas.width;
+      this.y     = Math.random() * canvas.height;
+      this.r     = Math.random() * 1.5 + 0.3;
+      this.alpha = Math.random() * 0.5 + 0.1;
+      this.dy    = -(Math.random() * 0.3 + 0.1);
+      this.dx    = (Math.random() - 0.5) * 0.4;
+      this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+    }
+    tick() {
+      this.x += this.dx; this.y += this.dy; this.alpha -= 0.001;
+      if (this.alpha <= 0 || this.y < 0) this.reset();
+    }
+    draw() {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+      ctx.fillStyle = this.color;
+      ctx.globalAlpha = this.alpha;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  const particles = Array.from({length: 130}, () => new Particle());
+  (function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    particles.forEach(p => { p.tick(); p.draw(); });
+    requestAnimationFrame(animate);
+  })();
+})();
+
+/* Scroll Fade-In */
+const _io = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.fade-in-up').forEach(el => _io.observe(el));
+</script>
+
+<!-- ── App Logic ── -->
+<script src="/js/app.js"></script>
+</body>
+</html>
