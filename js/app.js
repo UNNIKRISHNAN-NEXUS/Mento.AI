@@ -141,35 +141,48 @@ syllabusTextInput.addEventListener("input", checkFormValidity);
 
 // --- AI Skill Toggles ---
 
-if (toggleMathMode && chkMathMode) {
-    toggleMathMode.addEventListener("click", (e) => {
-        e.preventDefault();
-        chkMathMode.checked = !chkMathMode.checked;
+if (chkMathMode && toggleMathMode) {
+    chkMathMode.addEventListener("change", () => {
         toggleMathMode.classList.toggle("active", chkMathMode.checked);
     });
 }
 
-if (toggleHandwritingMode && chkHandwritingMode) {
-    toggleHandwritingMode.addEventListener("click", (e) => {
-        e.preventDefault();
-        chkHandwritingMode.checked = !chkHandwritingMode.checked;
+if (chkHandwritingMode && toggleHandwritingMode) {
+    chkHandwritingMode.addEventListener("change", () => {
         toggleHandwritingMode.classList.toggle("active", chkHandwritingMode.checked);
     });
 }
 
 // --- Format Selector Toggle ---
 
-choiceDocx.addEventListener("click", () => {
-    choiceDocx.classList.add("active");
-    choicePdf.classList.remove("active");
-    choiceDocx.querySelector("input").checked = true;
+const formatRadios = document.querySelectorAll('input[name="export_format"]');
+formatRadios.forEach(radio => {
+    radio.addEventListener("change", () => {
+        const checkedVal = document.querySelector('input[name="export_format"]:checked')?.value || "docx";
+        if (choiceDocx) choiceDocx.classList.toggle("active", checkedVal === "docx");
+        if (choicePdf) choicePdf.classList.toggle("active", checkedVal === "pdf");
+    });
 });
 
-choicePdf.addEventListener("click", () => {
-    choicePdf.classList.add("active");
-    choiceDocx.classList.remove("active");
-    choicePdf.querySelector("input").checked = true;
-});
+if (choiceDocx) {
+    choiceDocx.addEventListener("click", (e) => {
+        const radio = choiceDocx.querySelector("input");
+        if (radio && !radio.checked) {
+            radio.checked = true;
+            radio.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+    });
+}
+
+if (choicePdf) {
+    choicePdf.addEventListener("click", (e) => {
+        const radio = choicePdf.querySelector("input");
+        if (radio && !radio.checked) {
+            radio.checked = true;
+            radio.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+    });
+}
 
 // --- Multi-File & Dropzone Handlers ---
 
@@ -1095,7 +1108,6 @@ function createTopicAccordionItem(topic, defaultChecked = true) {
     // Topic Selection Checkbox in Header
     const chkLabel = document.createElement("label");
     chkLabel.className = "topic-check-label";
-    chkLabel.onclick = (e) => e.stopPropagation();
 
     const topicChk = document.createElement("input");
     topicChk.type = "checkbox";
@@ -1209,7 +1221,10 @@ function createTopicAccordionItem(topic, defaultChecked = true) {
     accItem.appendChild(accHeader);
     accItem.appendChild(accBody);
 
-    accHeader.addEventListener("click", () => {
+    accHeader.addEventListener("click", (e) => {
+        if (e.target.closest('.topic-check-label') || e.target.closest('.topic-chk') || e.target.tagName === 'INPUT') {
+            return;
+        }
         accItem.classList.toggle("open");
     });
 
@@ -1312,19 +1327,17 @@ function renderResultsPreview(results) {
     updateSelectionStats();
 
     // Wire Select All / Clear All toolbar buttons
+    function selectAllTopics(checked) {
+        document.querySelectorAll('.topic-chk:not(:disabled)').forEach(c => { c.checked = checked; });
+        document.querySelectorAll('.excerpt-chk:not(:disabled)').forEach(c => { c.checked = checked; });
+        updateSelectionStats();
+    }
+
     if (btnSelectAll) {
-        btnSelectAll.onclick = () => {
-            document.querySelectorAll('.topic-chk:not(:disabled)').forEach(c => c.checked = true);
-            document.querySelectorAll('.excerpt-chk').forEach(c => c.checked = true);
-            updateSelectionStats();
-        };
+        btnSelectAll.onclick = () => selectAllTopics(true);
     }
     if (btnClearAll) {
-        btnClearAll.onclick = () => {
-            document.querySelectorAll('.topic-chk').forEach(c => c.checked = false);
-            document.querySelectorAll('.excerpt-chk').forEach(c => c.checked = false);
-            updateSelectionStats();
-        };
+        btnClearAll.onclick = () => selectAllTopics(false);
     }
 }
 
