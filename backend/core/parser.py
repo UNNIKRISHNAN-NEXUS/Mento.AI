@@ -15,7 +15,7 @@ from PIL import Image
 from docx import Document as DocxDocument
 from docx2python import docx2python
 
-from backend.core.ocr_engine import extract_text_from_pixmap, TESSERACT_AVAILABLE
+from backend.core.ocr_engine import extract_text_from_pixmap, OCR_AVAILABLE
 from backend.core.math_parser import format_math_text, is_math_expression
 from backend.core.handwriting_ocr import extract_handwritten_text
 from backend.core.post_processor import clean_and_normalize_text
@@ -34,13 +34,13 @@ def parse_pdf(
 ) -> List[Dict[str, Any]]:
     """
     Parse a PDF file page by page.
-    Uses direct text extraction, math symbol normalization, and handwriting OCR.
+    Uses direct text extraction, math symbol normalization, and OCR (RapidOCR/Tesseract).
     """
     chunks = []
     try:
         doc = pymupdf.open(file_path)
         total_pages = len(doc)
-        logger.info(f"Parsing PDF {file_path} with {total_pages} pages. (Math: {math_mode}, Handwriting: {handwriting_mode})")
+        logger.info(f"Parsing PDF {file_path} with {total_pages} pages. (Math: {math_mode}, Handwriting: {handwriting_mode}, OCR: {OCR_AVAILABLE})")
         
         for i in range(total_pages):
             page = doc[i]
@@ -51,14 +51,15 @@ def parse_pdf(
                 
             text = page.get_text("text")
             cleaned_text = clean_text(text)
+            chunk_type = "digital"
             
             # Check if handwriting OCR is requested or page has low digital text density
-            if handwriting_mode or (len(cleaned_text) < 100 and TESSERACT_AVAILABLE):
-                logger.info(f"Page {page_num}: Running Handwriting/OCR pipeline...")
+            if handwriting_mode or (len(cleaned_text) < 50 and OCR_AVAILABLE):
+                logger.info(f"Page {page_num}: Running OCR pipeline...")
                 if progress_callback:
                     progress_callback(f"Running OCR on Page {page_num}", page_num, total_pages)
                 
-                pix = page.get_pixmap(dpi=150)
+                pix = page.get_pixmap(dpi=200)
                 img_bytes = pix.tobytes("png")
                 pil_img = Image.open(io.BytesIO(img_bytes))
                 
@@ -67,8 +68,10 @@ def parse_pdf(
                 else:
                     ocr_text = extract_text_from_pixmap(pix)
                     
-                cleaned_text = clean_text(ocr_text)
-                chunk_type = "handwriting_ocr" if handwriting_mode else "ocr"
+                ocr_cleaned = clean_text(ocr_text)
+                if ocr_cleaned:
+                    cleaned_text = ocr_cleaned
+                    chunk_type = "handwriting_ocr" if handwriting_mode else "ocr"
             else:
                 chunk_type = "digital"
                 
