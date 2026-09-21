@@ -3,6 +3,7 @@
 Mento.AI Structure-Aware Academic Heading & Topic Detector
 Detects meaningful academic section headers, numbered topics, and chapter titles.
 Strictly filters out stopwords, random OCR fragments, narrative sentences, and metadata.
+Preserves page-level granularity so no source page or paragraph is lost.
 """
 
 import re
@@ -12,7 +13,6 @@ from typing import List, Dict, Any, Optional, Tuple
 logger = logging.getLogger("heading_detector")
 
 # Domain-specific words that are NEVER valid as STANDALONE (single-word) headings
-# These CAN appear as first word in multi-word headings (e.g. "Signal Classification")
 INVALID_STANDALONE_WORDS = {
     "note", "example", "figure", "table",
     "definition", "introduction", "summary", "conclusion",
@@ -21,7 +21,6 @@ INVALID_STANDALONE_WORDS = {
 }
 
 # Grammatical stopwords/connectors that are NEVER valid as first word of ANY heading
-# (even multi-word headings must not START with these)
 INVALID_FIRST_WORDS = {
     "the", "and", "where", "which", "using", "this", "following", "therefore",
     "because", "is", "are", "with", "from", "that", "for", "about", "then",
@@ -31,10 +30,8 @@ INVALID_FIRST_WORDS = {
     "i.e", "e.g", "al", "et", "below", "above", "given"
 }
 
-# Combined set used only for single-word rejection (backwards-compatible alias)
 INVALID_SINGLE_WORDS = INVALID_STANDALONE_WORDS | INVALID_FIRST_WORDS
 
-# Common narrative sentence starters that must never become headings
 SENTENCE_STARTERS = [
     r"^(the|a|an)\s+[a-z]",
     r"^there\s+(are|is|were|was)\b",
@@ -59,7 +56,6 @@ SENTENCE_STARTERS = [
     r"^thus\b",
 ]
 
-# Explicit Academic Heading Numbering Patterns (includes em-dash U+2013/U+2014 in separators)
 NUMBERED_HEADING_PATTERN = re.compile(
     r'^(?:(?:UNIT|MODULE|CHAPTER|PART|SECTION|SEM)\s+([IVXLCDM\d]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN)[:\-\.\u2013\u2014\s]+)?'
     r'(\d+(?:\.\d+)*\.?|[A-Z]\.|\b[IVXLCDM]+\.?)\s+(.+)$',
@@ -74,7 +70,6 @@ UNIT_CHAPTER_ONLY_PATTERN = re.compile(
 def is_valid_academic_heading(line: str) -> bool:
     """
     Evaluates whether a text line is a genuine academic section or topic heading.
-    Rejects ordinary sentences, stopwords, punctuation-ended lines, and metadata.
     """
     if not line:
         return False
@@ -83,30 +78,22 @@ def is_valid_academic_heading(line: str) -> bool:
     if len(s) < 3 or len(s) > 85:
         return False
         
-    # Check if ends with ordinary sentence punctuation (. , ; ? !)
     if s.endswith(('.', ',', ';', '?', '!')):
         return False
         
-    # Mathematical equations and formulas with '=' or relational/calculus operators are never headings
     if any(op in s for op in ['=', '≈', '≠', '≤', '≥', '→', '⇒', '∫', '∑', '∏', '±']):
         return False
         
-    # Check for unit/chapter patterns (e.g. "UNIT 1: SIGNALS AND SYSTEMS", "CHAPTER 3: FILTERS")
     u_match = UNIT_CHAPTER_ONLY_PATTERN.match(s)
     if u_match:
-        # group(3) is the subtitle text AFTER the unit number (group(2) is the number itself)
         sub_title = u_match.group(3).strip()
-        # Strip em-dash and other unicode dash prefixes from the subtitle
         sub_clean = re.sub(r'^[\u2013\u2014\:\-\.\s]+', '', sub_title).strip()
-        # If there's a meaningful title after the unit declaration, it's valid
         if sub_clean:
             if len(sub_clean) >= 3:
                 return True
         else:
-            # Pure "UNIT 1" with no subtitle - still a valid unit heading
             return True
             
-    # Check for numbered headings (e.g. "1.1 Classification of Signals", "2. Fourier Analysis")
     m = NUMBERED_HEADING_PATTERN.match(s)
     hierarchy_num = ""
     core_text = s
@@ -114,7 +101,6 @@ def is_valid_academic_heading(line: str) -> bool:
         hierarchy_num = m.group(2).strip()
         core_text = m.group(3).strip()
         
-    # Clean leading punctuation, numbers, bullet symbols
     core_clean = re.sub(r'^[#*\-•\d\.\s\(\)\:\/]+', '', core_text).strip()
     if len(core_clean) < 3:
         return False
@@ -122,20 +108,16 @@ def is_valid_academic_heading(line: str) -> bool:
     core_lower = core_clean.lower()
     words = core_clean.split()
     
-    # 1. Reject single generic words or stopwords
     if len(words) == 1:
         if core_lower in INVALID_SINGLE_WORDS:
             return False
-        # Single word must be at least 4 letters, capitalized, and not end in punctuation
         if len(core_clean) < 4 or not core_clean[0].isupper():
             return False
             
-    # 2. Reject common narrative sentence starters
     for pat in SENTENCE_STARTERS:
         if re.search(pat, core_lower):
             return False
             
-    # 3. Reject narrative sentences with continuous verbs
     narrative_verb_patterns = [
         r"\b(is|are|was|were)\s+(defined|represented|used|calculated|shown|given|obtained|categorized|described|conveyed)\b",
         r"\bcan\s+be\s+(used|seen|calculated|obtained|modeled|classified)\b",
@@ -149,11 +131,9 @@ def is_valid_academic_heading(line: str) -> bool:
         if re.search(vp, core_lower):
             return False
             
-    # 4. Heading word count limit (academic headings are concise, rarely > 8 words)
     if len(words) > 8:
         return False
         
-    # 5. Check metadata / document boilerplate
     boilerplate = [
         "copyright", "rights reserved", "page ", "university", "department",
         "author", "isbn", "http", "www.", "@", "email", "all rights",
@@ -162,12 +142,9 @@ def is_valid_academic_heading(line: str) -> bool:
     if any(bp in core_lower for bp in boilerplate):
         return False
         
-    # 6. If explicitly numbered with valid core text, it is an academic heading!
     if m and len(words) >= 1:
         return True
         
-    # 7. Check formatting/case structure for unnumbered headings (e.g. "Fourier Transform", "Z-Transform")
-    # An unnumbered heading must begin with an uppercase letter
     if not core_clean[0].isupper():
         return False
         
@@ -178,20 +155,14 @@ def is_valid_academic_heading(line: str) -> bool:
         "that", "then", "than", "such", "also", "thus", "hence", "therefore",
         "while", "after", "before", "during", "since", "until"
     }
-    # Only reject first word if it's a grammatical stopword/connector (INVALID_FIRST_WORDS).
-    # Domain-specific words like 'signal', 'system', 'method' are allowed as first words
-    # in multi-word headings (e.g. "Signal Classification", "System Analysis").
     if first_word in prepositions_and_conjunctions or first_word in INVALID_FIRST_WORDS:
         return False
         
-    # Must be Uppercase, Title Case, or have a majority of words capitalized.
-    # Stricter for 3+ word headings to catch sentence fragments with low capitalization.
     capitalized_count = sum(1 for w in words if w and w[0].isupper())
-    required_cap = max(1, (len(words) + 1) // 2)  # ceiling division — e.g. 3 words needs 2 caps
+    required_cap = max(1, (len(words) + 1) // 2)
     if capitalized_count < required_cap:
         return False
     
-    # Must contain at least one substantial academic noun (>= 4 letters)
     if any(len(w) >= 4 and w.lower() not in INVALID_FIRST_WORDS for w in words):
         return True
             
@@ -208,7 +179,6 @@ def clean_heading_title(line: str) -> Tuple[str, str]:
         unit_type = u_match.group(1).split()[0].title()
         unit_num = u_match.group(2).strip()
         unit_title = u_match.group(3).strip()
-        # Strip em-dash, en-dash and standard punctuation separators from title
         title_clean = re.sub(r'^[\u2013\u2014\:\-\.\s]+', '', unit_title).strip()
         prefix = f"{unit_type} {unit_num}"
         if title_clean:
@@ -222,7 +192,6 @@ def clean_heading_title(line: str) -> Tuple[str, str]:
         title_clean = re.sub(r'^[:\-\.\s]+', '', title).strip()
         return title_clean, hierarchy
         
-    # Unnumbered heading
     clean = re.sub(r'^[#*\-•\d\.\s\(\)\:\/]+', '', s).strip()
     clean = re.sub(r'[:\s]+$', '', clean)
     return clean, ""
@@ -232,10 +201,8 @@ def segment_into_sections(
     doc_source: str
 ) -> List[Dict[str, Any]]:
     """
-    Segments document blocks/lines into coherent logical sections.
-    Each section is anchored by an academic heading and owns all following paragraphs until the next heading.
-    Long sections (>1400 chars) are automatically chunked into coherent sub-blocks preserving heading context.
-    Preserves and associates images to the appropriate section chunks.
+    Segments document blocks into coherent logical sections.
+    Preserves exact page numbers per paragraph so no source pages or paragraphs are collapsed.
     """
     sections = []
     current_heading = None
@@ -244,34 +211,37 @@ def segment_into_sections(
     current_type = "digital"
     current_paragraphs = []
     current_images = []
+    current_tables = []
     seen_img_ids = set()
     section_counter = 1
     
     def save_current_section():
-        nonlocal current_heading, current_hierarchy, current_paragraphs, current_images, seen_img_ids, current_page, current_type, section_counter
-        if not current_paragraphs and not current_images:
+        nonlocal current_heading, current_hierarchy, current_paragraphs, current_images, current_tables, seen_img_ids, current_page, current_type, section_counter
+        if not current_paragraphs and not current_images and not current_tables:
             return
             
         text_content = "\n\n".join(current_paragraphs).strip()
-        if len(text_content) < 15 and not current_images:
+        if len(text_content) < 10 and not current_images and not current_tables:
             current_paragraphs = []
             current_images = []
+            current_tables = []
             seen_img_ids = set()
             return
             
-        title = current_heading or "General Study Notes"
+        title = current_heading or f"Section Notes (Page {current_page})"
         full_ctx = f"{current_hierarchy} {title}".strip() if current_hierarchy else title
         section_imgs = list(current_images)
+        section_tabs = list(current_tables)
         
-        # If section is excessively long (>1400 chars), divide into coherent sub-chunks
-        if len(text_content) > 1400:
+        # Sub-divide if section is excessively long (>1200 chars) while preserving page context
+        if len(text_content) > 1200:
             sub_chunks = []
             cur_sub = []
             cur_sub_len = 0
             for p in current_paragraphs:
                 cur_sub.append(p)
                 cur_sub_len += len(p)
-                if cur_sub_len >= 1000:
+                if cur_sub_len >= 800:
                     sub_chunks.append("\n\n".join(cur_sub))
                     cur_sub = []
                     cur_sub_len = 0
@@ -280,8 +250,8 @@ def segment_into_sections(
                 
             for s_idx, s_text in enumerate(sub_chunks):
                 sec_id = f"{doc_source}_sec_{section_counter}_{s_idx+1}"
-                # Attach images to first sub-chunk or distribute
                 chunk_imgs = section_imgs if s_idx == 0 else []
+                chunk_tabs = section_tabs if s_idx == 0 else []
                 sections.append({
                     "chunk_id": sec_id,
                     "section_id": sec_id,
@@ -294,6 +264,7 @@ def segment_into_sections(
                     "paragraphs": current_paragraphs,
                     "text": s_text,
                     "images": chunk_imgs,
+                    "tables": chunk_tabs,
                     "is_structured_section": bool(current_heading)
                 })
             section_counter += 1
@@ -311,26 +282,41 @@ def segment_into_sections(
                 "paragraphs": list(current_paragraphs),
                 "text": text_content,
                 "images": section_imgs,
+                "tables": section_tabs,
                 "is_structured_section": bool(current_heading)
             })
             section_counter += 1
             
         current_paragraphs = []
         current_images = []
+        current_tables = []
         seen_img_ids = set()
         
+    last_page_seen = 1
+    
     for block in raw_blocks:
         page_num = block.get("page_number", 1)
         b_type = block.get("type", "digital")
         text = block.get("text", "").strip()
         block_imgs = block.get("images", [])
+        block_tabs = block.get("tables", [])
         
-        # Collect any images in this block
+        # If page number changed and we don't have an explicit structured heading spanning it,
+        # save the previous page's section to preserve page boundary granularity!
+        if page_num != last_page_seen and not current_heading and (current_paragraphs or current_images or current_tables):
+            save_current_section()
+            current_page = page_num
+            
+        last_page_seen = page_num
+        
         for img in block_imgs:
             img_key = img.get("image_id") or img.get("path")
             if img_key and img_key not in seen_img_ids:
                 seen_img_ids.add(img_key)
                 current_images.append(img)
+                
+        for tab in block_tabs:
+            current_tables.append(tab)
         
         if not text:
             continue
@@ -341,25 +327,18 @@ def segment_into_sections(
             if not line_str:
                 continue
                 
-            # Check if this line is a valid academic heading
             if is_valid_academic_heading(line_str):
-                # Save previous section
                 save_current_section()
-                
-                # Start new section
                 clean_title, hierarchy = clean_heading_title(line_str)
                 current_heading = clean_title
                 current_hierarchy = hierarchy
                 current_page = page_num
                 current_type = b_type
             else:
-                # Accumulate paragraph content
-                if not current_page:
+                if not current_paragraphs:
                     current_page = page_num
-                current_type = b_type
+                    current_type = b_type
                 current_paragraphs.append(line_str)
                 
-    # Save the final section
     save_current_section()
-    
     return sections

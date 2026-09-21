@@ -30,7 +30,6 @@ logger = logging.getLogger("main")
 
 app = FastAPI(title="Mento.AI", description="AI-Powered Syllabus-Based Notes Extractor")
 
-# CORS middleware for local frontend and Vercel same-origin access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,12 +38,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory progress, results, and diagnostic storage (task_id -> data)
 tasks_progress: Dict[str, Dict[str, Any]] = {}
 tasks_results: Dict[str, Dict[str, Any]] = {}
 tasks_diagnostics: Dict[str, Dict[str, Any]] = {}
 
-# Allowed file extensions
 ALLOWED_DOCS = {".pdf", ".docx", ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp"}
 
 def run_extraction_pipeline(
@@ -58,25 +55,29 @@ def run_extraction_pipeline(
 ):
     """
     Background worker pipeline.
-    Parses study material files (single or multiple) and syllabus, performs semantic matching,
-    detects non-syllabus Other Topics from notes, compiles the result structure, and records diagnostics.
+    Parses syllabus and study material documents into separate structured objects,
+    performs semantic matching, groups non-syllabus material, and logs complete diagnostic metrics.
     """
     try:
         tasks_progress[task_id] = {"status": "Parsing syllabus...", "progress": 10}
         logger.info(f"Task {task_id}: Parsing syllabus...")
         
-        # 1. Parse syllabus
-        topics = parse_syllabus(syllabus_file_path)
-        if not topics:
+        # 1. Parse syllabus (INDEX ONLY)
+        syllabus_topics = parse_syllabus(syllabus_file_path)
+        if not syllabus_topics:
             raise ValueError("No topics could be extracted from the syllabus.")
             
+        syllabus_chars = 0
+        if os.path.exists(syllabus_file_path):
+            with open(syllabus_file_path, "r", encoding="utf-8", errors="ignore") as sf:
+                syllabus_chars = len(sf.read())
+                
         tasks_progress[task_id] = {
-            "status": f"Syllabus parsed: Found {len(topics)} topics. Parsing study materials...", 
+            "status": f"Syllabus parsed: Found {len(syllabus_topics)} topics. Parsing study materials...", 
             "progress": 25
         }
-        logger.info(f"Task {task_id}: Syllabus parsed. {len(topics)} topics found.")
         
-        # 2. Parse study materials (supports multiple files)
+        # 2. Parse study materials (CONTENT SOURCE)
         all_chunks = []
         total_files = len(study_files_info)
         total_extracted_pages = 0
@@ -84,6 +85,7 @@ def run_extraction_pipeline(
         total_native_pages = 0
         total_ocr_pages = 0
         total_handwriting_pages = 0
+        total_tables = 0
         
         task_upload_dir, _ = get_task_paths(task_id)
         task_image_dir = os.path.join(task_upload_dir, "images")
@@ -94,7 +96,6 @@ def run_extraction_pipeline(
             orig_name = item.get("filename", os.path.basename(file_path)) if isinstance(item, dict) else os.path.basename(file_path)
             
             def parser_progress(stage: str, current: int, total: int):
-                # Map file progress to 25%-65% range
                 step_pct = 25 + int(((idx + (current / max(total, 1))) / total_files) * 40)
                 tasks_progress[task_id] = {
                     "status": f"[{idx+1}/{total_files}] {stage}...",
@@ -111,7 +112,6 @@ def run_extraction_pipeline(
             )
             all_chunks.extend(chunks)
             
-            # Count extraction metrics
             for c in chunks:
                 total_extracted_pages = max(total_extracted_pages, c.get("page_number", 1))
                 c_type = c.get("type", "digital")
@@ -122,6 +122,7 @@ def run_extraction_pipeline(
                 else:
                     total_native_pages += 1
                     total_native_chars += len(c.get("text", ""))
+                total_tables += len(c.get("tables", []))
             
         if not all_chunks:
             raise ValueError("No text could be extracted from the uploaded study material(s).")
@@ -130,14 +131,27 @@ def run_extraction_pipeline(
         total_extracted_images = sum(len(c.get("images", [])) for c in all_chunks)
         total_source_chars = sum(len(c.get("text", "")) for c in all_chunks)
         
-        logger.info(f"[EXTRACTION] files={total_files} pages={total_extracted_pages} native_chars={total_native_chars}")
-        if total_ocr_pages > 0:
-            logger.info(f"[OCR] pages_processed={total_ocr_pages}")
-        if total_handwriting_pages > 0:
-            logger.info(f"[HANDWRITING] pages_processed={total_handwriting_pages}")
-        logger.info(f"[HEADINGS] detected={headings_detected}")
-        logger.info(f"[IMAGE_EXTRACTION] extracted_images={total_extracted_images}")
-        logger.info(f"[CHUNKS] total={len(all_chunks)}")
+        # EXACT REQUIRED DIAGNOSTIC LOG
+        study_display_names = [
+            (item.get("filename") if isinstance(item, dict) else os.path.basename(item))
+            for item in study_files_info
+        ]
+        
+        print("\n" + "=" * 45)
+        print("========== DOCUMENT INGESTION ==========")
+        print(f"SYLLABUS:")
+        print(f"  filename: {syllabus_orig_name}")
+        print(f"  characters: {syllabus_chars}")
+        print(f"  topics detected: {len(syllabus_topics)}")
+        print(f"\nSTUDY MATERIAL:")
+        print(f"  filename: {', '.join(study_display_names)}")
+        print(f"  pages: {total_extracted_pages}")
+        print(f"  characters: {total_source_chars}")
+        print(f"  headings: {headings_detected}")
+        print(f"  paragraphs: {len(all_chunks)}")
+        print(f"  images: {total_extracted_images}")
+        print(f"  tables: {total_tables}")
+        print("=" * 45 + "\n")
         
         tasks_progress[task_id] = {
             "status": "Matching syllabus to study material notes...",
@@ -146,23 +160,24 @@ def run_extraction_pipeline(
         
         # 3. Match syllabus to document + Detect Other Topics + Retain 100% of material
         match_data = match_syllabus_to_document(
-            topics=topics,
+            topics=syllabus_topics,
             chunks=all_chunks,
             similarity_threshold=threshold,
-            top_k=5
+            top_k=25
         )
         
-        syllabus_matches_count = len([t for t in match_data.get("syllabus_topics", []) if t.get("matches")])
-        other_topics_count = len(match_data.get("other_topics", []))
-        total_detected_topics = len(match_data.get("topics", []))
+        print("\n" + "=" * 45)
+        print("========== MATCHING ==========")
+        for t in match_data.get("syllabus_topics", []):
+            t_name = t.get("title", "Unknown")
+            p_list = t.get("source_pages", [])
+            chars_cnt = t.get("source_text_chars", 0)
+            pages_str = ",".join(str(p) for p in p_list) if p_list else "None"
+            print(f"Topic: {t_name}")
+            print(f"  Matched source pages: {pages_str}")
+            print(f"  Matched text characters: {chars_cnt}")
+        print("=" * 45 + "\n")
         
-        logger.info(f"[MATCHING] syllabus_matches={syllabus_matches_count}")
-        logger.info(f"[OTHER_TOPICS] valid={other_topics_count}")
-        
-        study_display_names = [
-            (item.get("filename") if isinstance(item, dict) else os.path.basename(item))
-            for item in study_files_info
-        ]
         results_data = {
             "task_id": task_id,
             "syllabus_topics": match_data.get("syllabus_topics", []),
@@ -184,8 +199,8 @@ def run_extraction_pipeline(
             "native_text_pages": total_native_pages,
             "ocr_pages": total_ocr_pages,
             "handwriting_pages": total_handwriting_pages,
-            "detected_topics": total_detected_topics,
-            "selected_topics": total_detected_topics,
+            "detected_topics": len(match_data.get("topics", [])),
+            "selected_topics": len(match_data.get("topics", [])),
             "source_text_chars": total_source_chars,
             "images_extracted": total_extracted_images,
             "output_pages": 0,
@@ -218,7 +233,7 @@ async def upload_files(
     study_material: List[UploadFile] = File(...),
     syllabus: Optional[UploadFile] = File(None),
     syllabus_text: Optional[str] = Form(None),
-    threshold: float = Form(0.35),
+    threshold: float = Form(0.25),
     math_mode: bool = Form(False),
     handwriting_mode: bool = Form(False)
 ):
@@ -395,6 +410,7 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
         selected_set = set(selected_topic_ids)
         for topic in all_stored_topics:
             if topic.get("topic_id") in selected_set:
+                # If client passed specific custom excerpts for this topic, use them if non-empty
                 custom_topic = next((ct for ct in client_custom_topics if ct.get("topic_id") == topic["topic_id"]), None)
                 if custom_topic and "matches" in custom_topic and len(custom_topic["matches"]) > 0:
                     topic_copy = dict(topic)
@@ -433,9 +449,24 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
     total_source_chars = sum(len(m.get("text", "")) for t in valid_topics for m in t.get("matches", []))
     total_source_images = sum(len(m.get("images", [])) for t in valid_topics for m in t.get("matches", []))
     total_source_tables = sum(len(m.get("tables", [])) for t in valid_topics for m in t.get("matches", []))
+    all_pages = sorted(set(m.get("page_number", 1) for t in valid_topics for m in t.get("matches", [])))
     
-    logger.info(f"[SELECTION] selected={len(valid_topics)}")
-    logger.info(f"[GENERATOR] source_chars={total_source_chars} source_images={total_source_images} source_tables={total_source_tables}")
+    # EXACT REQUIRED DIAGNOSTIC LOG
+    print("\n" + "=" * 45)
+    print("========== GENERATION INPUT ==========")
+    print(f"Topics selected: {len(valid_topics)}\n")
+    for idx, t in enumerate(valid_topics):
+        t_pages = sorted(set(m.get("page_number", 1) for m in t.get("matches", [])))
+        t_chars = sum(len(m.get("text", "")) for m in t.get("matches", []))
+        t_imgs = sum(len(m.get("images", [])) for m in t.get("matches", []))
+        print(f"Topic {idx+1}:")
+        print(f"  Name: {t.get('title')}")
+        print(f"  Source pages: {','.join(str(p) for p in t_pages)}")
+        print(f"  Text characters: {t_chars}")
+        print(f"  Images: {t_imgs}\n")
+    print(f"TOTAL SOURCE TEXT: {total_source_chars} characters")
+    print(f"TOTAL SOURCE PAGES: {len(all_pages)}")
+    print("=" * 45 + "\n")
         
     _, output_path = get_task_paths(task_id)
     
@@ -455,13 +486,20 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
             )
             val_rep = validate_generated_document(output_file, export_format="pdf")
             
-            # Update diagnostics
+            # Post-generation validation failure check
+            if val_rep.get("total_chars", 0) < 50 and val_rep.get("images_count", 0) == 0:
+                raise ValueError("Generated PDF is empty or missing study content.")
+                
+            if len(all_pages) >= 5 and val_rep.get("page_count", 1) == 1:
+                raise ValueError(f"Generation anomaly: {len(all_pages)} source pages collapsed into 1 output page.")
+                
             if task_id in tasks_diagnostics:
                 tasks_diagnostics[task_id]["output_pages"] = val_rep.get("page_count", 1)
                 tasks_diagnostics[task_id]["output_text_chars"] = val_rep.get("total_chars", 0)
                 tasks_diagnostics[task_id]["images_rendered"] = val_rep.get("images_count", 0)
                 tasks_diagnostics[task_id]["selected_topics"] = len(valid_topics)
                 
+            print(f"[VALIDATION] Output pages: {val_rep.get('page_count', 1)} | Output chars: {val_rep.get('total_chars', 0)} | Status: PASS\n")
             return {"download_url": f"/api/download/{task_id}?format=pdf", "format": "pdf"}
         else:
             output_file = os.path.join(output_path, "extracted_notes.docx")
@@ -473,13 +511,16 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
             )
             val_rep = validate_generated_document(output_file, export_format="docx")
             
-            # Update diagnostics
+            if val_rep.get("total_chars", 0) < 50 and val_rep.get("images_count", 0) == 0:
+                raise ValueError("Generated DOCX is empty or missing study content.")
+                
             if task_id in tasks_diagnostics:
                 tasks_diagnostics[task_id]["output_pages"] = 1
                 tasks_diagnostics[task_id]["output_text_chars"] = val_rep.get("total_chars", 0)
                 tasks_diagnostics[task_id]["images_rendered"] = val_rep.get("images_count", 0)
                 tasks_diagnostics[task_id]["selected_topics"] = len(valid_topics)
                 
+            print(f"[VALIDATION] Output DOCX chars: {val_rep.get('total_chars', 0)} | Status: PASS\n")
             return {"download_url": f"/api/download/{task_id}?format=docx", "format": "docx"}
             
     except Exception as e:
@@ -520,7 +561,6 @@ async def get_task_diagnostics(task_id: str):
     if task_id in tasks_diagnostics:
         return tasks_diagnostics[task_id]
         
-    # Return default baseline metrics if task was processed
     if task_id in tasks_results:
         res = tasks_results[task_id]
         topics = res.get("topics", [])
