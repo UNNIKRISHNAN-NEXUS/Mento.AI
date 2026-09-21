@@ -11,12 +11,26 @@ let syllabusMode = "file"; // "file" or "text"
 let taskId = null;
 let rawResults = null;
 
-// API Configuration — auto-detect local dev vs production
-// Local: backend runs on same origin (localhost:8000)
-// Vercel deployment: backend runs on Render.com
-const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? window.location.origin
-    : 'https://mento-ai-backend.onrender.com';
+// API Configuration — auto-detect local dev vs production with configurable fallback
+function getApiBaseUrl() {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return window.location.origin;
+    }
+    const savedUrl = localStorage.getItem("MENTO_BACKEND_URL");
+    if (savedUrl && savedUrl.trim()) {
+        return savedUrl.trim().replace(/\/+$/, '');
+    }
+    return 'https://mento-ai-backend.onrender.com';
+}
+
+function setCustomBackendUrl(newUrl) {
+    if (newUrl && newUrl.trim()) {
+        const cleanUrl = newUrl.trim().replace(/\/+$/, '');
+        localStorage.setItem("MENTO_BACKEND_URL", cleanUrl);
+        return cleanUrl;
+    }
+    return getApiBaseUrl();
+}
 
 // DOM Elements
 const studyDropzone = document.getElementById("study-material-dropzone");
@@ -255,18 +269,32 @@ startProcessBtn.addEventListener("click", async () => {
     formData.append("math_mode", chkMathMode ? chkMathMode.checked : false);
     formData.append("handwriting_mode", chkHandwritingMode ? chkHandwritingMode.checked : false);
 
+    const apiBase = getApiBaseUrl();
+
     try {
         showStage(processingStage);
         progressBarFill.style.width = "0%";
         progressPct.textContent = "0%";
         progressStatusTitle.textContent = "Uploading study files & syllabus...";
 
-        const response = await fetch(`${API_BASE}/api/upload`, {
+        const response = await fetch(`${apiBase}/api/upload`, {
             method: "POST",
             body: formData
         });
 
         if (!response.ok) {
+            if (response.status === 404 || response.status === 502 || response.status === 503) {
+                const promptUrl = prompt(
+                    `Backend connection error (${response.status}) at:\n${apiBase}\n\nIf your Render backend URL is different, please enter it below (e.g., https://your-render-app.onrender.com):`,
+                    apiBase
+                );
+                if (promptUrl && promptUrl.trim()) {
+                    setCustomBackendUrl(promptUrl);
+                    alert("Render Backend URL saved! Click 'Start Processing' again.");
+                }
+                showStage(uploadStage);
+                return;
+            }
             let errorMsg = "Upload failed";
             try {
                 const err = await response.json();
@@ -287,7 +315,8 @@ startProcessBtn.addEventListener("click", async () => {
 });
 
 function startProgressMonitoring(task_id) {
-    const eventSource = new EventSource(`${API_BASE}/api/process/${task_id}`);
+    const apiBase = getApiBaseUrl();
+    const eventSource = new EventSource(`${apiBase}/api/process/${task_id}`);
 
     eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -322,7 +351,8 @@ function startProgressMonitoring(task_id) {
 async function fetchResults(task_id) {
     try {
         progressStatusTitle.textContent = "Fetching results preview...";
-        const response = await fetch(`${API_BASE}/api/results/${task_id}`);
+        const apiBase = getApiBaseUrl();
+        const response = await fetch(`${apiBase}/api/results/${task_id}`);
         if (!response.ok) {
             throw new Error("Failed to fetch matches");
         }
@@ -516,7 +546,8 @@ generateDocxBtn.addEventListener("click", async () => {
         generateDocxBtn.setAttribute("disabled", "true");
         generateDocxBtn.textContent = `Generating ${exportFormat.toUpperCase()}...`;
 
-        const response = await fetch(`${API_BASE}/api/generate/${taskId}`, {
+        const apiBase = getApiBaseUrl();
+        const response = await fetch(`${apiBase}/api/generate/${taskId}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -531,7 +562,7 @@ generateDocxBtn.addEventListener("click", async () => {
 
         const data = await response.json();
         
-        directDownloadLink.href = `${API_BASE}${data.download_url}`;
+        directDownloadLink.href = `${apiBase}${data.download_url}`;
         downloadFilename.textContent = `extracted_notes.${data.format}`;
         downloadFileSize.textContent = `Format: ${data.format.toUpperCase()} (Times New Roman 12-14pt Pure Black)`;
         directDownloadLink.querySelector("span").textContent = `Download ${data.format.toUpperCase()}`;
