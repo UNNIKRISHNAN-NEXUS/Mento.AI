@@ -29,11 +29,11 @@ logger = logging.getLogger("main")
 
 app = FastAPI(title="Mento.AI", description="AI-Powered Syllabus-Based Notes Extractor")
 
-# CORS middleware for local frontend access
+# CORS middleware for local frontend and Vercel same-origin access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

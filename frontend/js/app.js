@@ -11,25 +11,11 @@ let syllabusMode = "file"; // "file" or "text"
 let taskId = null;
 let rawResults = null;
 
-// API Configuration — auto-detect local dev vs production with configurable fallback
-function getApiBaseUrl() {
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return window.location.origin;
-    }
-    const savedUrl = localStorage.getItem("MENTO_BACKEND_URL");
-    if (savedUrl && savedUrl.trim()) {
-        return savedUrl.trim().replace(/\/+$/, '');
-    }
-    return 'https://mento-ai-backend-sc4k.onrender.com';
-}
+// API Configuration — Same-origin deployment for local & Vercel
+const API_BASE_URL = "";
 
-function setCustomBackendUrl(newUrl) {
-    if (newUrl && newUrl.trim()) {
-        const cleanUrl = newUrl.trim().replace(/\/+$/, '');
-        localStorage.setItem("MENTO_BACKEND_URL", cleanUrl);
-        return cleanUrl;
-    }
-    return getApiBaseUrl();
+function getApiBaseUrl() {
+    return API_BASE_URL;
 }
 
 // DOM Elements
