@@ -133,6 +133,7 @@ def run_extraction_pipeline(
         }
 
 @app.post("/api/upload")
+@app.post("/upload")
 async def upload_files(
     background_tasks: BackgroundTasks,
     study_material: List[UploadFile] = File(...),
@@ -214,6 +215,7 @@ async def upload_files(
     return {"task_id": task_id}
 
 @app.get("/api/process/{task_id}")
+@app.get("/process/{task_id}")
 async def get_processing_status(task_id: str):
     """Server-Sent Events (SSE) progress streaming endpoint."""
     if task_id not in tasks_progress:
@@ -232,6 +234,7 @@ async def get_processing_status(task_id: str):
     return StreamingResponse(status_generator(), media_type="text/event-stream")
 
 @app.get("/api/results/{task_id}")
+@app.get("/results/{task_id}")
 async def get_results(task_id: str):
     """Retrieve raw matched results for previewing."""
     if task_id not in tasks_results:
@@ -242,6 +245,7 @@ async def get_results(task_id: str):
     return tasks_results[task_id]
 
 @app.post("/api/generate/{task_id}")
+@app.post("/generate/{task_id}")
 async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
     """
     Generates notes in requested format (DOCX or PDF).
@@ -290,6 +294,7 @@ async def generate_output_notes(task_id: str, payload: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=f"Failed to generate {export_format.upper()} document: {str(e)}")
 
 @app.get("/api/download/{task_id}")
+@app.get("/download/{task_id}")
 async def download_file(task_id: str, format: str = "docx"):
     """Download the generated notes file in requested format (DOCX or PDF)."""
     _, output_path = get_task_paths(task_id)
@@ -314,6 +319,7 @@ async def download_file(task_id: str, format: str = "docx"):
     )
 
 @app.get("/api/health")
+@app.get("/health")
 async def health_check():
     """Verify if the server is alive."""
     from backend.core.ocr_engine import TESSERACT_AVAILABLE
