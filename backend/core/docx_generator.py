@@ -520,7 +520,8 @@ def generate_pdf(
                         clean_p = p_text.strip()
                         if not clean_p:
                             continue
-                        story.append(Paragraph(xml_safe(clean_p), body_style))
+                        safe_body = xml_safe(clean_p).replace("\n", "<br/>")
+                        story.append(Paragraph(safe_body, body_style))
                 
                 # Insert tables
                 match_tables = match.get("tables", [])
