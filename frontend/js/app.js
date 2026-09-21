@@ -11,23 +11,16 @@ let syllabusMode = "file"; // "file" or "text"
 let taskId = null;
 let rawResults = null;
 
-// API Configuration — Same-origin unified API endpoints for Vercel and local
-function getApiBaseUrl() {
-    const savedUrl = localStorage.getItem("MENTO_BACKEND_URL");
-    if (savedUrl && savedUrl.trim()) {
-        return savedUrl.trim().replace(/\/+$/, '');
+// Clean up any stale legacy backend URLs from browser storage
+try {
+    if (localStorage.getItem("MENTO_BACKEND_URL")) {
+        localStorage.removeItem("MENTO_BACKEND_URL");
     }
-    // Relative same-origin on Vercel and localhost
-    return "";
-}
+} catch (e) {}
 
-function setCustomBackendUrl(newUrl) {
-    if (newUrl && newUrl.trim()) {
-        const cleanUrl = newUrl.trim().replace(/\/+$/, '');
-        localStorage.setItem("MENTO_BACKEND_URL", cleanUrl);
-        return cleanUrl;
-    }
-    return getApiBaseUrl();
+// API Configuration — 100% Vercel native same-origin relative endpoints
+function getApiBaseUrl() {
+    return "";
 }
 
 // DOM Elements
@@ -281,18 +274,6 @@ startProcessBtn.addEventListener("click", async () => {
         });
 
         if (!response.ok) {
-            if (response.status === 404 || response.status === 502 || response.status === 503) {
-                const promptUrl = prompt(
-                    `Backend connection error (${response.status}) at:\n${apiBase}\n\nIf your Render backend URL is different, please enter it below (e.g., https://your-render-app.onrender.com):`,
-                    apiBase
-                );
-                if (promptUrl && promptUrl.trim()) {
-                    setCustomBackendUrl(promptUrl);
-                    alert("Render Backend URL saved! Click 'Start Processing' again.");
-                }
-                showStage(uploadStage);
-                return;
-            }
             let errorMsg = "Upload failed";
             try {
                 const err = await response.json();
@@ -318,18 +299,7 @@ startProcessBtn.addEventListener("click", async () => {
             startProgressMonitoring(taskId);
         }
     } catch (err) {
-        if (err.message.includes("Failed to fetch") || err.name === "TypeError") {
-            const promptUrl = prompt(
-                `Backend connection error at:\n${apiBase}\n\nIf your backend URL is different (e.g. https://mento-ai-backend-sc4k.onrender.com), please enter it below:`,
-                apiBase || "https://mento-ai-backend-sc4k.onrender.com"
-            );
-            if (promptUrl && promptUrl.trim()) {
-                setCustomBackendUrl(promptUrl);
-                alert("Backend URL saved! Click 'Start Processing' again.");
-            }
-        } else {
-            alert(`Error starting task: ${err.message}`);
-        }
+        alert(`Error: ${err.message}`);
         showStage(uploadStage);
     }
 });
