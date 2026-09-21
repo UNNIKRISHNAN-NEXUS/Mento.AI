@@ -1,0 +1,9 @@
+Machine learning involves systems that improve performance on a task based on experience. Learning can be categorized into three main categories: supervised, unsupervised, and reinforcement learning. Supervised learning relies on labeled training pairs, whereas unsupervised learning looks for patterns in unlabeled datasets.
+
+Common evaluation metrics are critical to verify model success. Accuracy is the ratio of correctly predicted observations to the total observations. Precision measures the proportion of positive identifications that were actually correct. Recall measures the proportion of actual positives that were identified correctly. The F1-score is the harmonic mean of precision and recall.
+
+McCulloch-Pitts neurons are early mathematical models of biological neurons. An Artificial Neural Network (ANN) consists of interconnected nodes or artificial neurons that compute inputs using weights and biases.
+
+Backpropagation is a widely used algorithm to train neural networks. It works by computing the gradient of the loss function with respect to the weights of the network. This gradient is calculated using the chain rule, moving backwards through layers from the output to updating parameters.
+
+Activation functions introduce non-linearities into neural networks, enabling them to learn complex patterns. Common options are the Sigmoid function, which outputs between 0 and 1, the Hyperbolic Tangent (Tanh) function, and the Rectified Linear Unit (ReLU), which maps negative inputs to 0 and positive inputs to themselves.

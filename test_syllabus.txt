@@ -1,0 +1,9 @@
+UNIT I: INTRODUCTION TO MACHINE LEARNING
+- What is learning? Definition and types of learning.
+- Supervised learning vs Unsupervised learning paradigms.
+- Evaluation metrics: accuracy, precision, recall, and F1-score.
+
+UNIT II: NEURAL NETWORKS
+- Artificial Neural Networks and McCulloch-Pitts neurons.
+- Backpropagation algorithm and weight update formulas.
+- Activation functions: ReLU, Sigmoid, and Tanh.
