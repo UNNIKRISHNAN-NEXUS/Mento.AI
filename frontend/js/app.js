@@ -11,11 +11,20 @@ let syllabusMode = "file"; // "file" or "text"
 let taskId = null;
 let rawResults = null;
 
-// API Configuration — Same-origin deployment for local & Vercel
-const API_BASE_URL = "";
-
+// API Configuration — Auto-detect local, unified Vercel, or dual Vercel setup
 function getApiBaseUrl() {
-    return API_BASE_URL;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return "";
+    }
+    // Dual Vercel deployment support: frontend on mento-ai-iota -> backend on mento-ai-app
+    if (window.location.hostname === 'mento-ai-iota.vercel.app') {
+        return 'https://mento-ai-app.vercel.app';
+    }
+    const savedUrl = localStorage.getItem("MENTO_BACKEND_URL");
+    if (savedUrl && savedUrl.trim()) {
+        return savedUrl.trim().replace(/\/+$/, '');
+    }
+    return "";
 }
 
 // DOM Elements
